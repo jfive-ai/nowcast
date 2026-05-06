@@ -31,8 +31,9 @@ struct ReportView: View {
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .onAppear { markdown = state.loadMarkdown(for: report) }
-        .onChange(of: report) { _ in markdown = state.loadMarkdown(for: report) }
+        .task(id: report.id) {
+            markdown = state.loadMarkdown(for: report)
+        }
     }
 
     @ViewBuilder

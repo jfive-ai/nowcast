@@ -16,6 +16,7 @@ struct ContentView: View {
         } detail: {
             if let report = selectedReport {
                 ReportView(report: report)
+                    .id(report.id)
             } else {
                 placeholder
             }
