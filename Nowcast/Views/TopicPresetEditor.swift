@@ -135,20 +135,39 @@ struct TopicPresetEditor: View {
             }
             .formStyle(.grouped)
 
-            HStack {
+            HStack(spacing: 8) {
+                if !isValid {
+                    Text(validationHint)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.escape, modifiers: [])
+                    .keyboardShortcut(.cancelAction)
                 Button("Save") {
                     onSave(buildPreset())
                     dismiss()
                 }
-                .keyboardShortcut(.return, modifiers: [.command])
-                .disabled(!isValid)
                 .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(!isValid)
             }
             .padding()
         }
+        .frame(minWidth: 460, idealWidth: 460, minHeight: 560, idealHeight: 620)
+    }
+
+    private var validationHint: String {
+        if name.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "Add a name to enable Save."
+        }
+        if query.trimmingCharacters(in: .whitespaces).isEmpty {
+            return "Add a topic / query to enable Save."
+        }
+        if sources.isEmpty {
+            return "Pick at least one source."
+        }
+        return ""
     }
 
     private func binding(for kind: SourceKind) -> Binding<Bool> {

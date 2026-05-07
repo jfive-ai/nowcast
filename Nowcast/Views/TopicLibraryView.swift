@@ -19,13 +19,11 @@ struct TopicLibraryView: View {
             TopicPresetEditor(preset: nil) { saved in
                 state.savePreset(saved)
             }
-            .frame(width: 460)
         }
         .sheet(item: $editingPreset) { preset in
             TopicPresetEditor(preset: preset) { saved in
                 state.savePreset(saved)
             }
-            .frame(width: 460)
         }
     }
 
