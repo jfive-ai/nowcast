@@ -14,6 +14,10 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             SubscriptionsView()
                 .tabItem { Label("Sources", systemImage: "list.bullet.rectangle") }
+            NitterMirrorsView()
+                .tabItem { Label("Nitter", systemImage: "network") }
+            EmailSettingsView()
+                .tabItem { Label("Email", systemImage: "envelope") }
         }
         .padding()
         .onAppear {

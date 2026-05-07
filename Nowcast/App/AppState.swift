@@ -30,6 +30,10 @@ final class AppState: ObservableObject {
         didSet { rebuildPipeline() }
     }
 
+    @Published var smtpSettings: SMTPSettings {
+        didSet { SMTPSettingsStore.shared.save(smtpSettings) }
+    }
+
     /// Days to retain reports. 0 means keep forever.
     @Published var retentionDays: Int {
         didSet { UserDefaults.standard.set(retentionDays, forKey: Self.retentionDaysKey) }
@@ -54,6 +58,7 @@ final class AppState: ObservableObject {
         self.openAIAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.openAI) ?? ""
         self.youtubeAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.youtube) ?? ""
         self.braveAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.braveSearch) ?? ""
+        self.smtpSettings = SMTPSettingsStore.shared.load()
         self.retentionDays = UserDefaults.standard.object(forKey: Self.retentionDaysKey) as? Int
             ?? Self.defaultRetentionDays
 
@@ -85,6 +90,14 @@ final class AppState: ObservableObject {
 
     func saveBraveAPIKey(_ key: String) {
         saveSecret(key, account: KeychainAccount.braveSearch) { self.braveAPIKey = $0 }
+    }
+
+    func saveSMTPPassword(_ password: String) {
+        saveSecret(password, account: KeychainAccount.smtpPassword) { _ in }
+    }
+
+    var hasSMTPPassword: Bool {
+        !(KeychainStore.shared.getSecret(account: KeychainAccount.smtpPassword) ?? "").isEmpty
     }
 
     private func saveSecret(_ key: String, account: String, apply: (String) -> Void) {
@@ -142,6 +155,9 @@ final class AppState: ObservableObject {
                let preset = presets.first(where: { $0.id == presetID }) {
                 if preset.deliveryChannels.contains(.notification) {
                     await NotificationManager.shared.postReportReady(report)
+                }
+                if preset.deliveryChannels.contains(.email) {
+                    await sendEmailDigest(report: report)
                 }
                 // .menuBar and .inApp surface implicitly via the menu bar
                 // and history list; no extra side effect needed.
@@ -243,6 +259,22 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func sendEmailDigest(report: Report) async {
+        guard smtpSettings.isConfigured,
+              let password = KeychainStore.shared.getSecret(account: KeychainAccount.smtpPassword),
+              !password.isEmpty else {
+            lastError = "SMTP not configured. Set host, credentials, and recipients in Settings → Email."
+            return
+        }
+        let markdown = (try? storage.loadMarkdown(for: report)) ?? ""
+        let sender = EmailDigestSender(settings: smtpSettings, password: password)
+        do {
+            try await sender.send(report: report, markdown: markdown)
+        } catch {
+            lastError = "Email digest failed: \(error.localizedDescription)"
+        }
+    }
+
     private func loadSubscriptions() {
         do {
             subscriptions = try storage.listSubscriptions()
@@ -284,6 +316,7 @@ final class AppState: ObservableObject {
             RedditAdapter(),
             RSSAdapter(),
             NewsAdapter(),
+            NitterAdapter(mirrorStore: .shared),
         ]
         // YouTube + web search adapters only attach when the user has
         // supplied the corresponding API key — otherwise they would either

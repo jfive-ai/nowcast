@@ -111,6 +111,7 @@ struct SubscriptionsView: View {
         case .reddit:        return "Subreddit (e.g. ethereum)"
         case .rss:           return "Feed URL"
         case .youtubeChannel:return "Channel ID, @handle, or channel URL"
+        case .xNitter:       return "X handle (e.g. vitalikbuterin)"
         default:             return "Identifier"
         }
     }
@@ -123,6 +124,8 @@ struct SubscriptionsView: View {
             return "RSS subscriptions are fetched on every run; no global search."
         case .youtubeChannel:
             return "Pulls the latest uploads from each subscribed channel and best-effort fetches transcripts when available."
+        case .xNitter:
+            return "X (Twitter) activity is pulled via Nitter mirrors. Configure mirrors in the Nitter mirrors tab. An empty result means \"no recent activity\" rather than failure."
         default:
             return ""
         }
@@ -155,5 +158,6 @@ struct SubscriptionsView: View {
         .reddit,
         .rss,
         .youtubeChannel,
+        .xNitter,
     ]
 }
