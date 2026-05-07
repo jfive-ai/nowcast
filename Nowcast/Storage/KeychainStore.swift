@@ -72,6 +72,7 @@ enum KeychainError: Error, LocalizedError {
 /// Account names live alongside the LLM clients that own them.
 enum KeychainAccount {
     static let openAI = "openai.api_key"
+    static let anthropic = "anthropic.api_key"
     static let youtube = "youtube.api_key"
     static let braveSearch = "brave.api_key"
     static let smtpPassword = "smtp.password"
