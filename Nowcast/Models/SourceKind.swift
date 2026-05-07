@@ -29,9 +29,9 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
     /// `false` cases render disabled with a "Coming soon" badge.
     var isAvailable: Bool {
         switch self {
-        case .hackerNews, .reddit, .rss, .news:
+        case .hackerNews, .reddit, .rss, .news, .youtubeSearch, .youtubeChannel:
             return true
-        case .youtubeSearch, .youtubeChannel, .web, .xNitter:
+        case .web, .xNitter:
             return false
         }
     }
