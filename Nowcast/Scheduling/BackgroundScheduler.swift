@@ -50,22 +50,22 @@ final class BackgroundScheduler {
         // Allow the system a 25% wiggle room either side of `interval`.
         activity.tolerance = max(60, interval * 0.25)
 
-        let presetID = preset.id
+        // Capture the preset so we can re-arm the next cycle from inside the
+        // firing closure. If the user edits the preset, `reschedule(_:)`
+        // cancels and re-registers with the new value, so a stale capture
+        // here is replaced before it can fire.
+        let capturedPreset = preset
         activity.schedule { [weak self] completion in
             Task { @MainActor in
-                await self?.onFire?(presetID)
+                await self?.onFire?(capturedPreset.id)
                 completion(.finished)
-                // Re-register so the next cycle is queued from a fresh "now".
-                self?.rescheduleSelf(presetID: presetID)
+                // Re-arm the same preset so hourly/daily/weekly cadences
+                // actually recur. `schedule(_:)` invalidates the just-fired
+                // activity and registers a fresh one from now.
+                self?.schedule(capturedPreset)
             }
         }
 
         activities[preset.id] = activity
-    }
-
-    /// Re-schedule a single preset by id. Looked up via `onFire`'s side effects;
-    /// here we just clear the slot so the next `reschedule(_:)` fills it.
-    private func rescheduleSelf(presetID: UUID) {
-        activities[presetID] = nil
     }
 }
