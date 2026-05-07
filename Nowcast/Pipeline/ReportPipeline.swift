@@ -7,13 +7,15 @@ final class ReportPipeline {
     private let adapters: [SourceKind: SourceAdapter]
     private let storage: StorageManager
     private let llm: LLMClient
+    private let model: String?
 
-    init(adapters: [SourceAdapter], storage: StorageManager, llm: LLMClient) {
+    init(adapters: [SourceAdapter], storage: StorageManager, llm: LLMClient, model: String? = nil) {
         var map: [SourceKind: SourceAdapter] = [:]
         for adapter in adapters { map[adapter.kind] = adapter }
         self.adapters = map
         self.storage = storage
         self.llm = llm
+        self.model = model
     }
 
     /// Generate a report. Throws if no items are found at all (caller decides
@@ -58,7 +60,7 @@ final class ReportPipeline {
 
         // 3. Build prompt and call the LLM.
         let prompt = BriefingPrompt.render(topic: topic, window: window, items: fresh)
-        let body = try await llm.summarize(prompt: prompt, model: nil)
+        let body = try await llm.summarize(prompt: prompt, model: model)
 
         // 4. Wrap with a header and persist.
         let header = Self.headerMarkdown(topic: topic, window: window, fresh: fresh.count, total: collected.count)

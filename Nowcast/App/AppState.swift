@@ -22,6 +22,10 @@ final class AppState: ObservableObject {
         didSet { rebuildPipeline() }
     }
 
+    @Published var anthropicAPIKey: String {
+        didSet { rebuildPipeline() }
+    }
+
     @Published var youtubeAPIKey: String {
         didSet { rebuildPipeline() }
     }
@@ -32,6 +36,43 @@ final class AppState: ObservableObject {
 
     @Published var smtpSettings: SMTPSettings {
         didSet { SMTPSettingsStore.shared.save(smtpSettings) }
+    }
+
+    /// Active LLM provider used by ReportPipeline + SourceSuggester.
+    @Published var llmProvider: LLMProvider {
+        didSet {
+            UserDefaults.standard.set(llmProvider.rawValue, forKey: Self.llmProviderKey)
+            rebuildPipeline()
+        }
+    }
+
+    /// Per-provider model override. Empty means "use the provider default".
+    @Published var openAIModel: String {
+        didSet {
+            UserDefaults.standard.set(openAIModel, forKey: Self.openAIModelKey)
+            if llmProvider == .openAI { rebuildPipeline() }
+        }
+    }
+
+    @Published var anthropicModel: String {
+        didSet {
+            UserDefaults.standard.set(anthropicModel, forKey: Self.anthropicModelKey)
+            if llmProvider == .anthropic { rebuildPipeline() }
+        }
+    }
+
+    @Published var ollamaModel: String {
+        didSet {
+            UserDefaults.standard.set(ollamaModel, forKey: Self.ollamaModelKey)
+            if llmProvider == .ollama { rebuildPipeline() }
+        }
+    }
+
+    @Published var ollamaBaseURL: String {
+        didSet {
+            UserDefaults.standard.set(ollamaBaseURL, forKey: Self.ollamaBaseURLKey)
+            rebuildPipeline()
+        }
     }
 
     /// Days to retain reports. 0 means keep forever.
@@ -46,6 +87,12 @@ final class AppState: ObservableObject {
 
     static let retentionDaysKey = "nowcast.retention_days"
     static let defaultRetentionDays = 30
+    static let llmProviderKey = "nowcast.llm.provider"
+    static let openAIModelKey = "nowcast.llm.openai.model"
+    static let anthropicModelKey = "nowcast.llm.anthropic.model"
+    static let ollamaModelKey = "nowcast.llm.ollama.model"
+    static let ollamaBaseURLKey = "nowcast.llm.ollama.base_url"
+    static let defaultOllamaBaseURL = "http://localhost:11434"
 
     init() {
         // Storage MUST come up; if it doesn't, the app can't function.
@@ -56,11 +103,20 @@ final class AppState: ObservableObject {
         }
 
         self.openAIAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.openAI) ?? ""
+        self.anthropicAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.anthropic) ?? ""
         self.youtubeAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.youtube) ?? ""
         self.braveAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.braveSearch) ?? ""
         self.smtpSettings = SMTPSettingsStore.shared.load()
         self.retentionDays = UserDefaults.standard.object(forKey: Self.retentionDaysKey) as? Int
             ?? Self.defaultRetentionDays
+
+        let providerRaw = UserDefaults.standard.string(forKey: Self.llmProviderKey) ?? LLMProvider.openAI.rawValue
+        self.llmProvider = LLMProvider(rawValue: providerRaw) ?? .openAI
+        self.openAIModel = UserDefaults.standard.string(forKey: Self.openAIModelKey) ?? ""
+        self.anthropicModel = UserDefaults.standard.string(forKey: Self.anthropicModelKey) ?? ""
+        self.ollamaModel = UserDefaults.standard.string(forKey: Self.ollamaModelKey) ?? ""
+        self.ollamaBaseURL = UserDefaults.standard.string(forKey: Self.ollamaBaseURLKey)
+            ?? Self.defaultOllamaBaseURL
 
         rebuildPipeline()
         applyRetention()
@@ -82,6 +138,10 @@ final class AppState: ObservableObject {
 
     func saveAPIKey(_ key: String) {
         saveSecret(key, account: KeychainAccount.openAI) { self.openAIAPIKey = $0 }
+    }
+
+    func saveAnthropicAPIKey(_ key: String) {
+        saveSecret(key, account: KeychainAccount.anthropic) { self.anthropicAPIKey = $0 }
     }
 
     func saveYouTubeAPIKey(_ key: String) {
@@ -136,7 +196,7 @@ final class AppState: ObservableObject {
                              sources: [SourceKind],
                              presetID: UUID?) async {
         guard let pipeline else {
-            lastError = "Set your OpenAI API key in Settings first."
+            lastError = missingProviderMessage
             return
         }
         isGenerating = true
@@ -286,13 +346,12 @@ final class AppState: ObservableObject {
     /// LLM-driven source discovery. Returns proposals; the caller decides
     /// which to actually persist (the user picks in the UI).
     func suggestSubscriptions(topic: String) async -> [SourceSubscription] {
-        guard !openAIAPIKey.isEmpty else {
-            lastError = "Set your OpenAI API key in Settings first."
+        guard let llm = makeLLMClient() else {
+            lastError = missingProviderMessage
             return []
         }
         isSuggesting = true
         defer { isSuggesting = false }
-        let llm = OpenAIClient(apiKey: openAIAPIKey)
         let suggester = SourceSuggester(llm: llm)
         do {
             return try await suggester.suggest(topic: topic)
@@ -304,12 +363,39 @@ final class AppState: ObservableObject {
 
     // MARK: - Internals
 
+    /// Build the active LLM client based on the user's provider selection.
+    /// Returns nil when the selected provider lacks a required secret /
+    /// configuration so callers can surface a helpful Settings prompt.
+    private func makeLLMClient() -> LLMClient? {
+        switch llmProvider {
+        case .openAI:
+            guard !openAIAPIKey.isEmpty else { return nil }
+            return OpenAIClient(apiKey: openAIAPIKey)
+        case .anthropic:
+            guard !anthropicAPIKey.isEmpty else { return nil }
+            return AnthropicClient(apiKey: anthropicAPIKey)
+        case .ollama:
+            let urlString = ollamaBaseURL.trimmingCharacters(in: .whitespaces)
+            guard let url = URL(string: urlString.isEmpty ? Self.defaultOllamaBaseURL : urlString) else {
+                return nil
+            }
+            return OllamaClient(baseURL: url)
+        }
+    }
+
+    private var missingProviderMessage: String {
+        switch llmProvider {
+        case .openAI:    return "Set your OpenAI API key in Settings first."
+        case .anthropic: return "Set your Anthropic API key in Settings first."
+        case .ollama:    return "Configure the Ollama base URL in Settings first."
+        }
+    }
+
     private func rebuildPipeline() {
-        guard !openAIAPIKey.isEmpty else {
+        guard let llm = makeLLMClient() else {
             pipeline = nil
             return
         }
-        let llm = OpenAIClient(apiKey: openAIAPIKey)
 
         var adapters: [SourceAdapter] = [
             HackerNewsAdapter(),
@@ -331,7 +417,21 @@ final class AppState: ObservableObject {
         pipeline = ReportPipeline(
             adapters: adapters,
             storage: storage,
-            llm: llm
+            llm: llm,
+            model: activeModelOverride
         )
+    }
+
+    /// User-configured model override for the active provider, or nil to let
+    /// the LLM client use its built-in default.
+    private var activeModelOverride: String? {
+        let raw: String
+        switch llmProvider {
+        case .openAI:    raw = openAIModel
+        case .anthropic: raw = anthropicModel
+        case .ollama:    raw = ollamaModel
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
