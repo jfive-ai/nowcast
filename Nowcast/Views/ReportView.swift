@@ -1,10 +1,13 @@
 import SwiftUI
+import AppKit
+import UniformTypeIdentifiers
 
 struct ReportView: View {
     @EnvironmentObject private var state: AppState
     let report: Report
 
     @State private var markdown: String = ""
+    @State private var copyFlash: Bool = false
 
     var body: some View {
         ScrollView {
@@ -40,6 +43,70 @@ struct ReportView: View {
         .task(id: report.id) {
             markdown = state.loadMarkdown(for: report)
         }
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button(action: copyMarkdown) {
+                    Label(copyFlash ? "Copied" : "Copy", systemImage: "doc.on.doc")
+                }
+                .help("Copy the report markdown to the clipboard")
+
+                Menu {
+                    Button("Save as Markdown…") { saveMarkdown() }
+                    Button("Save as PDF…") { savePDF() }
+                    Divider()
+                    Button("Share…") { share() }
+                } label: {
+                    Label("Export", systemImage: "square.and.arrow.up")
+                }
+                .disabled(markdown.isEmpty)
+            }
+        }
+    }
+
+    // MARK: - Toolbar actions
+
+    private func copyMarkdown() {
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(markdown, forType: .string)
+        copyFlash = true
+        Task {
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            copyFlash = false
+        }
+    }
+
+    private func saveMarkdown() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.nameFieldStringValue = "\(ReportExporter.defaultBasename(for: report)).md"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try ReportExporter.writeMarkdown(markdown, to: url)
+        } catch {
+            state.lastError = error.localizedDescription
+        }
+    }
+
+    private func savePDF() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.nameFieldStringValue = "\(ReportExporter.defaultBasename(for: report)).pdf"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try ReportExporter.writePDF(markdown: markdown, to: url)
+        } catch {
+            state.lastError = error.localizedDescription
+        }
+    }
+
+    private func share() {
+        // Anchor the picker to the front window's content view so it
+        // appears at the toolbar position rather than the screen origin.
+        guard let window = NSApp.keyWindow ?? NSApp.windows.first,
+              let anchor = window.contentView else { return }
+        let picker = NSSharingServicePicker(items: [markdown])
+        picker.show(relativeTo: .zero, of: anchor, preferredEdge: .minY)
     }
 
     /// Compact "<provider> · <model> · 1.2k tok · ~$0.01" line. `nil` when
