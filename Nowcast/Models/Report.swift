@@ -10,4 +10,8 @@ struct Report: Identifiable, Codable, Hashable {
     let markdownPath: String
     let byteSize: Int64
     let sourceCount: Int
+    /// `nil` while unread; set when the user opens the report.
+    var readAt: Date?
+
+    var isUnread: Bool { readAt == nil }
 }

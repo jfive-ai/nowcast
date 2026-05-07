@@ -45,6 +45,32 @@ enum Schema {
             }
         }
 
+        // v2: presets gain cadence + delivery + window;
+        //     reports gain a read_at marker for the menu-bar unread badge.
+        m.registerMigration("v2") { db in
+            try db.alter(table: "topic_preset") { t in
+                t.add(column: "window", .text).notNull().defaults(to: TimeWindow.today.rawValue)
+                t.add(column: "cadence_json", .text).notNull().defaults(to: Self.manualCadenceJSON)
+                t.add(column: "delivery_json", .text).notNull().defaults(to: Self.defaultDeliveryJSON)
+            }
+            try db.alter(table: "report") { t in
+                t.add(column: "read_at", .datetime)
+            }
+        }
+
         return m
     }
+
+    /// `Cadence.manual` encoded as JSON. Used as the default for rows
+    /// that pre-existed before the v2 migration.
+    private static let manualCadenceJSON: String = {
+        let data = (try? JSONEncoder().encode(Cadence.manual)) ?? Data("{}".utf8)
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }()
+
+    /// `[.inApp]` encoded as JSON.
+    private static let defaultDeliveryJSON: String = {
+        let data = (try? JSONEncoder().encode([DeliveryChannel.inApp])) ?? Data("[]".utf8)
+        return String(data: data, encoding: .utf8) ?? "[]"
+    }()
 }

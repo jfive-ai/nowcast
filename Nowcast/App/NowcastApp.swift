@@ -20,5 +20,19 @@ struct NowcastApp: App {
                 .environmentObject(state)
                 .frame(width: 480, height: 360)
         }
+
+        MenuBarExtra {
+            MenuBarContentView()
+                .environmentObject(state)
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "newspaper")
+                if state.unreadCount > 0 {
+                    Text("\(state.unreadCount)")
+                        .font(.caption)
+                }
+            }
+        }
+        .menuBarExtraStyle(.window)
     }
 }
