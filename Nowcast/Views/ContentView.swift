@@ -2,7 +2,6 @@ import SwiftUI
 
 struct ContentView: View {
     @EnvironmentObject private var state: AppState
-    @State private var selectedReport: Report?
 
     var body: some View {
         NavigationSplitView {
@@ -10,13 +9,14 @@ struct ContentView: View {
                 TopicLibraryView()
                     .padding()
                 Divider()
-                HistoryView(selectedReport: $selectedReport)
+                HistoryView(selectedReport: selectionBinding)
             }
             .frame(minWidth: 280)
         } detail: {
             if let report = selectedReport {
                 ReportView(report: report)
                     .id(report.id)
+                    .onAppear { state.markRead(reportID: report.id) }
             } else {
                 placeholder
             }
@@ -32,6 +32,18 @@ struct ContentView: View {
         } message: {
             Text(state.lastError ?? "")
         }
+    }
+
+    private var selectedReport: Report? {
+        guard let id = state.selectedReportID else { return nil }
+        return state.reports.first { $0.id == id }
+    }
+
+    private var selectionBinding: Binding<Report?> {
+        Binding(
+            get: { selectedReport },
+            set: { state.selectedReportID = $0?.id }
+        )
     }
 
     private var placeholder: some View {

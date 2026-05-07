@@ -46,6 +46,9 @@ final class ReportPipeline {
         }
 
         // 2. Dedupe within this run by URL hash, then against persistent seen-index.
+        //    Note: we *check* the seen-index but do not record yet — recording
+        //    only happens after a successful insert, otherwise a network
+        //    failure would permanently blacklist items.
         let withinRunUnique = Self.dedupeWithinRun(collected)
         let fresh = try storage.filterUnseen(withinRunUnique, presetID: presetID)
 
@@ -61,18 +64,23 @@ final class ReportPipeline {
         let header = Self.headerMarkdown(topic: topic, window: window, fresh: fresh.count, total: collected.count)
         let markdown = header + "\n\n" + body
 
-        let report = Report(
+        let draft = Report(
             id: UUID(),
             presetID: presetID,
             topic: topic,
             window: window,
             generatedAt: Date(),
-            markdownPath: "",  // filled in by storage
+            markdownPath: "",
             byteSize: Int64(markdown.utf8.count),
-            sourceCount: fresh.count
+            sourceCount: fresh.count,
+            readAt: nil
         )
-        try storage.insertReport(report, markdown: markdown)
-        return report
+        let stored = try storage.insertReport(draft, markdown: markdown)
+
+        // 5. Only now record the items as seen — guarantees retry-on-failure.
+        try storage.recordSeen(fresh, presetID: presetID)
+
+        return stored
     }
 
     // MARK: - Helpers
