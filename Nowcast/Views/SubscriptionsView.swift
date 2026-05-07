@@ -10,9 +10,49 @@ struct SubscriptionsView: View {
     @State private var draftKind: SourceKind = .reddit
     @State private var draftIdentifier: String = ""
     @State private var draftLabel: String = ""
+    @State private var suggestTopic: String = ""
+    @State private var suggestions: [SourceSubscription] = []
 
     var body: some View {
         Form {
+            Section("Suggest sources") {
+                TextField("Topic (e.g. rust async runtime)", text: $suggestTopic)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { runSuggest() }
+                HStack {
+                    Spacer()
+                    Button {
+                        runSuggest()
+                    } label: {
+                        if state.isSuggesting {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text("Suggest")
+                        }
+                    }
+                    .disabled(suggestTopic.trimmingCharacters(in: .whitespaces).isEmpty
+                              || state.isSuggesting)
+                }
+                if !suggestions.isEmpty {
+                    ForEach(suggestions) { s in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(s.label.isEmpty ? s.identifier : s.label)
+                                Text("\(s.kind.displayName) · \(s.identifier)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Button("Add") {
+                                state.saveSubscription(s)
+                                suggestions.removeAll(where: { $0.id == s.id })
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                    }
+                }
+            }
+
             Section("Add subscription") {
                 Picker("Source", selection: $draftKind) {
                     ForEach(Self.subscribableKinds) { kind in
@@ -99,6 +139,14 @@ struct SubscriptionsView: View {
         state.saveSubscription(sub)
         draftIdentifier = ""
         draftLabel = ""
+    }
+
+    private func runSuggest() {
+        let topic = suggestTopic.trimmingCharacters(in: .whitespaces)
+        guard !topic.isEmpty, !state.isSuggesting else { return }
+        Task {
+            suggestions = await state.suggestSubscriptions(topic: topic)
+        }
     }
 
     /// Source kinds that support per-instance subscriptions. (Hacker News
