@@ -13,6 +13,7 @@ final class AppState: ObservableObject {
     @Published private(set) var unreadCount: Int = 0
     @Published var lastError: String?
     @Published var isGenerating: Bool = false
+    @Published var isSuggesting: Bool = false
     /// Bound by `ContentView` so external triggers (notifications, menu bar)
     /// can change which report is shown.
     @Published var selectedReportID: UUID?
@@ -250,6 +251,25 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// LLM-driven source discovery. Returns proposals; the caller decides
+    /// which to actually persist (the user picks in the UI).
+    func suggestSubscriptions(topic: String) async -> [SourceSubscription] {
+        guard !openAIAPIKey.isEmpty else {
+            lastError = "Set your OpenAI API key in Settings first."
+            return []
+        }
+        isSuggesting = true
+        defer { isSuggesting = false }
+        let llm = OpenAIClient(apiKey: openAIAPIKey)
+        let suggester = SourceSuggester(llm: llm)
+        do {
+            return try await suggester.suggest(topic: topic)
+        } catch {
+            lastError = error.localizedDescription
+            return []
+        }
+    }
+
     // MARK: - Internals
 
     private func rebuildPipeline() {
@@ -271,6 +291,9 @@ final class AppState: ObservableObject {
         if !youtubeAPIKey.isEmpty {
             adapters.append(YouTubeSearchAdapter(apiKey: youtubeAPIKey))
             adapters.append(YouTubeChannelAdapter(apiKey: youtubeAPIKey))
+        }
+        if !braveAPIKey.isEmpty {
+            adapters.append(BraveSearchAdapter(apiKey: braveAPIKey))
         }
         pipeline = ReportPipeline(
             adapters: adapters,
