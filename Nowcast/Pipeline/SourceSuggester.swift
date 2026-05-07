@@ -15,8 +15,8 @@ struct SourceSuggester {
         guard !trimmed.isEmpty else { return [] }
 
         let prompt = Self.prompt(for: trimmed)
-        let raw = try await llm.summarize(prompt: prompt, model: nil)
-        return Self.parse(raw)
+        let response = try await llm.summarize(prompt: prompt, model: nil)
+        return Self.parse(response.text)
     }
 
     static func prompt(for topic: String) -> String {

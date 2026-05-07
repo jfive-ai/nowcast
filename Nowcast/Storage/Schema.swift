@@ -58,6 +58,18 @@ enum Schema {
             }
         }
 
+        // v3: reports gain LLM usage + cost columns. All nullable so
+        // existing rows survive untouched.
+        m.registerMigration("v3") { db in
+            try db.alter(table: "report") { t in
+                t.add(column: "prompt_tokens", .integer)
+                t.add(column: "completion_tokens", .integer)
+                t.add(column: "usd_cost", .double)
+                t.add(column: "model_used", .text)
+                t.add(column: "provider_used", .text)
+            }
+        }
+
         return m
     }
 

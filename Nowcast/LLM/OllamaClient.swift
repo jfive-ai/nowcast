@@ -16,9 +16,10 @@ struct OllamaClient: LLMClient {
         self.session = session
     }
 
-    func summarize(prompt: String, model: String?) async throws -> String {
+    func summarize(prompt: String, model: String?) async throws -> LLMResponse {
+        let resolvedModel = model ?? defaultModel
         let body = ChatRequest(
-            model: model ?? defaultModel,
+            model: resolvedModel,
             messages: [.init(role: "user", content: prompt)],
             stream: false,
             options: .init(temperature: 0.3)
@@ -46,7 +47,15 @@ struct OllamaClient: LLMClient {
             let parsed = try JSONDecoder().decode(ChatResponse.self, from: data)
             let content = parsed.message.content
             guard !content.isEmpty else { throw LLMError.emptyResponse }
-            return content
+            // Ollama reports `prompt_eval_count` (input tokens) and
+            // `eval_count` (output tokens) when present.
+            let usage: LLMUsage?
+            if let p = parsed.prompt_eval_count, let c = parsed.eval_count {
+                usage = LLMUsage(promptTokens: p, completionTokens: c)
+            } else {
+                usage = nil
+            }
+            return LLMResponse(text: content, model: resolvedModel, usage: usage)
         } catch let llmError as LLMError {
             throw llmError
         } catch {
@@ -72,6 +81,8 @@ struct OllamaClient: LLMClient {
 
     private struct ChatResponse: Decodable {
         let message: Message
+        let prompt_eval_count: Int?
+        let eval_count: Int?
         struct Message: Decodable {
             let role: String
             let content: String

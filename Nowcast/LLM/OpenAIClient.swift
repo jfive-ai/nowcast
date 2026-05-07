@@ -16,11 +16,12 @@ struct OpenAIClient: LLMClient {
         self.session = session
     }
 
-    func summarize(prompt: String, model: String?) async throws -> String {
+    func summarize(prompt: String, model: String?) async throws -> LLMResponse {
         guard !apiKey.isEmpty else { throw LLMError.missingAPIKey }
 
+        let resolvedModel = model ?? defaultModel
         let body = ChatRequest(
-            model: model ?? defaultModel,
+            model: resolvedModel,
             messages: [.init(role: "user", content: prompt)],
             temperature: 0.3
         )
@@ -49,7 +50,10 @@ struct OpenAIClient: LLMClient {
                   !content.isEmpty else {
                 throw LLMError.emptyResponse
             }
-            return content
+            let usage = parsed.usage.map {
+                LLMUsage(promptTokens: $0.prompt_tokens, completionTokens: $0.completion_tokens)
+            }
+            return LLMResponse(text: content, model: resolvedModel, usage: usage)
         } catch let llmError as LLMError {
             throw llmError
         } catch {
@@ -71,7 +75,12 @@ struct OpenAIClient: LLMClient {
 
     private struct ChatResponse: Decodable {
         let choices: [Choice]
+        let usage: Usage?
         struct Choice: Decodable { let message: Message }
         struct Message: Decodable { let content: String }
+        struct Usage: Decodable {
+            let prompt_tokens: Int
+            let completion_tokens: Int
+        }
     }
 }

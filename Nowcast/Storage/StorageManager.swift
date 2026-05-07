@@ -32,8 +32,9 @@ final class StorageManager {
             try dbQueue.write { db in
                 try db.execute(sql: """
                     INSERT INTO report
-                      (id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                      (id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, arguments: [
                         report.id.uuidString,
                         report.presetID?.uuidString,
@@ -44,6 +45,11 @@ final class StorageManager {
                         size,
                         report.sourceCount,
                         report.readAt,
+                        report.promptTokens,
+                        report.completionTokens,
+                        report.usdCost,
+                        report.modelUsed,
+                        report.providerUsed,
                     ])
             }
         } catch {
@@ -62,7 +68,12 @@ final class StorageManager {
             markdownPath: relativePath,
             byteSize: size,
             sourceCount: report.sourceCount,
-            readAt: report.readAt
+            readAt: report.readAt,
+            promptTokens: report.promptTokens,
+            completionTokens: report.completionTokens,
+            usdCost: report.usdCost,
+            modelUsed: report.modelUsed,
+            providerUsed: report.providerUsed
         )
         return stored
     }
@@ -70,7 +81,8 @@ final class StorageManager {
     func listReports() throws -> [Report] {
         try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
-                SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at
+                SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used
                 FROM report
                 ORDER BY generated_at DESC
                 """).compactMap(Self.makeReport)
@@ -110,7 +122,8 @@ final class StorageManager {
         guard count > 0 else { return 0 }
         let oldest = try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
-                SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at
+                SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used
                 FROM report
                 ORDER BY generated_at ASC
                 LIMIT ?
@@ -125,7 +138,8 @@ final class StorageManager {
     func deleteReports(olderThan cutoff: Date) throws -> Int {
         let stale = try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
-                SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at
+                SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used
                 FROM report
                 WHERE generated_at < ?
                 """, arguments: [cutoff]).compactMap(Self.makeReport)
@@ -321,6 +335,11 @@ final class StorageManager {
 
         let presetID: UUID? = (row["preset_id"] as String?).flatMap(UUID.init(uuidString:))
         let readAt: Date? = row["read_at"]
+        let promptTokens: Int? = row["prompt_tokens"]
+        let completionTokens: Int? = row["completion_tokens"]
+        let usdCost: Double? = row["usd_cost"]
+        let modelUsed: String? = row["model_used"]
+        let providerUsed: String? = row["provider_used"]
 
         return Report(
             id: id,
@@ -331,7 +350,12 @@ final class StorageManager {
             markdownPath: markdownPath,
             byteSize: byteSize,
             sourceCount: sourceCount,
-            readAt: readAt
+            readAt: readAt,
+            promptTokens: promptTokens,
+            completionTokens: completionTokens,
+            usdCost: usdCost,
+            modelUsed: modelUsed,
+            providerUsed: providerUsed
         )
     }
 

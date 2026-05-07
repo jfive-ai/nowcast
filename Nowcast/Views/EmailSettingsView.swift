@@ -137,7 +137,12 @@ struct EmailSettingsView: View {
             markdownPath: "",
             byteSize: Int64(testMarkdown.utf8.count),
             sourceCount: 0,
-            readAt: nil
+            readAt: nil,
+            promptTokens: nil,
+            completionTokens: nil,
+            usdCost: nil,
+            modelUsed: nil,
+            providerUsed: nil
         )
         do {
             try await sender.send(report: testReport, markdown: testMarkdown)

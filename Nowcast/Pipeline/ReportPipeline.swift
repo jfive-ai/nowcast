@@ -60,12 +60,15 @@ final class ReportPipeline {
 
         // 3. Build prompt and call the LLM.
         let prompt = BriefingPrompt.render(topic: topic, window: window, items: fresh)
-        let body = try await llm.summarize(prompt: prompt, model: model)
+        let response = try await llm.summarize(prompt: prompt, model: model)
 
         // 4. Wrap with a header and persist.
         let header = Self.headerMarkdown(topic: topic, window: window, fresh: fresh.count, total: collected.count)
-        let markdown = header + "\n\n" + body
+        let markdown = header + "\n\n" + response.text
 
+        let usdCost = response.usage.flatMap {
+            ModelPricing.cost(forModel: response.model, usage: $0)
+        }
         let draft = Report(
             id: UUID(),
             presetID: presetID,
@@ -75,7 +78,12 @@ final class ReportPipeline {
             markdownPath: "",
             byteSize: Int64(markdown.utf8.count),
             sourceCount: fresh.count,
-            readAt: nil
+            readAt: nil,
+            promptTokens: response.usage?.promptTokens,
+            completionTokens: response.usage?.completionTokens,
+            usdCost: usdCost,
+            modelUsed: response.model,
+            providerUsed: llm.providerName
         )
         let stored = try storage.insertReport(draft, markdown: markdown)
 

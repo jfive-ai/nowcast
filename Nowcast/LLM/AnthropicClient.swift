@@ -22,11 +22,12 @@ struct AnthropicClient: LLMClient {
         self.session = session
     }
 
-    func summarize(prompt: String, model: String?) async throws -> String {
+    func summarize(prompt: String, model: String?) async throws -> LLMResponse {
         guard !apiKey.isEmpty else { throw LLMError.missingAPIKey }
 
+        let resolvedModel = model ?? defaultModel
         let body = MessagesRequest(
-            model: model ?? defaultModel,
+            model: resolvedModel,
             max_tokens: 4096,
             temperature: 0.3,
             messages: [.init(role: "user", content: prompt)]
@@ -57,7 +58,10 @@ struct AnthropicClient: LLMClient {
                 .compactMap { $0.type == "text" ? $0.text : nil }
                 .joined()
             guard !text.isEmpty else { throw LLMError.emptyResponse }
-            return text
+            let usage = parsed.usage.map {
+                LLMUsage(promptTokens: $0.input_tokens, completionTokens: $0.output_tokens)
+            }
+            return LLMResponse(text: text, model: resolvedModel, usage: usage)
         } catch let llmError as LLMError {
             throw llmError
         } catch {
@@ -80,9 +84,14 @@ struct AnthropicClient: LLMClient {
 
     private struct MessagesResponse: Decodable {
         let content: [Block]
+        let usage: Usage?
         struct Block: Decodable {
             let type: String
             let text: String?
+        }
+        struct Usage: Decodable {
+            let input_tokens: Int
+            let output_tokens: Int
         }
     }
 }
