@@ -212,6 +212,45 @@ final class StorageManager {
         }
     }
 
+    // MARK: - Source subscriptions
+
+    func upsertSubscription(_ sub: SourceSubscription) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO source_subscription (id, kind, identifier, label)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                  kind = excluded.kind,
+                  identifier = excluded.identifier,
+                  label = excluded.label
+                """, arguments: [
+                    sub.id.uuidString,
+                    sub.kind.rawValue,
+                    sub.identifier,
+                    sub.label,
+                ])
+        }
+    }
+
+    func deleteSubscription(id: UUID) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "DELETE FROM source_subscription WHERE id = ?",
+                arguments: [id.uuidString]
+            )
+        }
+    }
+
+    func listSubscriptions() throws -> [SourceSubscription] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT id, kind, identifier, label
+                FROM source_subscription
+                ORDER BY label ASC
+                """).compactMap(Self.makeSubscription)
+        }
+    }
+
     // MARK: - Seen-item dedup
 
     /// Returns only items whose URL hashes haven't been recorded for this preset.
@@ -325,6 +364,17 @@ final class StorageManager {
             createdAt: createdAt,
             lastRunAt: lastRun
         )
+    }
+
+    private static func makeSubscription(from row: Row) -> SourceSubscription? {
+        guard let idString: String = row["id"],
+              let id = UUID(uuidString: idString),
+              let kindRaw: String = row["kind"],
+              let kind = SourceKind(rawValue: kindRaw),
+              let identifier: String = row["identifier"],
+              let label: String = row["label"]
+        else { return nil }
+        return SourceSubscription(id: id, kind: kind, identifier: identifier, label: label)
     }
 
     private static func encodeJSON<T: Encodable>(_ value: T) throws -> String {

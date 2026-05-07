@@ -10,6 +10,8 @@ struct SettingsView: View {
         TabView {
             generalTab
                 .tabItem { Label("General", systemImage: "gearshape") }
+            SubscriptionsView()
+                .tabItem { Label("Sources", systemImage: "list.bullet.rectangle") }
         }
         .padding()
         .onAppear {

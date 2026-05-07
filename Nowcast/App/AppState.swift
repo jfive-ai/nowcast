@@ -8,6 +8,7 @@ import Combine
 final class AppState: ObservableObject {
     @Published private(set) var reports: [Report] = []
     @Published private(set) var presets: [TopicPreset] = []
+    @Published private(set) var subscriptions: [SourceSubscription] = []
     @Published private(set) var totalReportBytes: Int64 = 0
     @Published private(set) var unreadCount: Int = 0
     @Published var lastError: String?
@@ -110,7 +111,7 @@ final class AppState: ObservableObject {
                 window: window,
                 sources: sources,
                 presetID: presetID,
-                subscriptions: []
+                subscriptions: subscriptions
             )
             refresh()
 
@@ -136,6 +137,7 @@ final class AppState: ObservableObject {
             lastError = error.localizedDescription
         }
         loadPresets()
+        loadSubscriptions()
     }
 
     func deleteOldest(_ n: Int = 10) {
@@ -198,6 +200,34 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: - Subscriptions
+
+    func saveSubscription(_ sub: SourceSubscription) {
+        do {
+            try storage.upsertSubscription(sub)
+            loadSubscriptions()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func deleteSubscription(_ sub: SourceSubscription) {
+        do {
+            try storage.deleteSubscription(id: sub.id)
+            loadSubscriptions()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    private func loadSubscriptions() {
+        do {
+            subscriptions = try storage.listSubscriptions()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
     // MARK: - Internals
 
     private func rebuildPipeline() {
@@ -207,7 +237,7 @@ final class AppState: ObservableObject {
         }
         let llm = OpenAIClient(apiKey: openAIAPIKey)
         pipeline = ReportPipeline(
-            adapters: [HackerNewsAdapter()],
+            adapters: [HackerNewsAdapter(), RedditAdapter(), RSSAdapter(), NewsAdapter()],
             storage: storage,
             llm: llm
         )

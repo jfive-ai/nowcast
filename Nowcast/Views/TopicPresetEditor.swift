@@ -79,14 +79,14 @@ struct TopicPresetEditor: View {
                         Toggle(isOn: binding(for: kind)) {
                             HStack {
                                 Text(kind.displayName)
-                                if !kind.isAvailableInMVP {
-                                    Text("Phase 2+")
+                                if !kind.isAvailable {
+                                    Text("Coming soon")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
                             }
                         }
-                        .disabled(!kind.isAvailableInMVP)
+                        .disabled(!kind.isAvailable)
                     }
                 }
 

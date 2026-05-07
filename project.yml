@@ -17,6 +17,9 @@ packages:
   GRDB:
     url: https://github.com/groue/GRDB.swift
     from: "6.29.0"
+  FeedKit:
+    url: https://github.com/nmdias/FeedKit
+    from: "9.1.2"
 targets:
   Nowcast:
     type: application
@@ -53,6 +56,8 @@ targets:
     dependencies:
       - package: GRDB
         product: GRDB
+      - package: FeedKit
+        product: FeedKit
 schemes:
   Nowcast:
     build:

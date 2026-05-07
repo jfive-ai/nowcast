@@ -25,8 +25,14 @@ enum SourceKind: String, Codable, CaseIterable, Identifiable, Hashable {
         }
     }
 
-    /// Phase 1 MVP only enables Hacker News.
-    var isAvailableInMVP: Bool {
-        self == .hackerNews
+    /// Adapters that ship in the current build. Editor toggles for
+    /// `false` cases render disabled with a "Coming soon" badge.
+    var isAvailable: Bool {
+        switch self {
+        case .hackerNews, .reddit, .rss, .news:
+            return true
+        case .youtubeSearch, .youtubeChannel, .web, .xNitter:
+            return false
+        }
     }
 }
