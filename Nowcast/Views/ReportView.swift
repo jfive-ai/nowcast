@@ -23,6 +23,12 @@ struct ReportView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
+                if let usage = usageSummary {
+                    Text(usage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 Divider()
 
                 renderedMarkdown
@@ -34,6 +40,25 @@ struct ReportView: View {
         .task(id: report.id) {
             markdown = state.loadMarkdown(for: report)
         }
+    }
+
+    /// Compact "<provider> · <model> · 1.2k tok · ~$0.01" line. `nil` when
+    /// nothing useful was recorded (Ollama with no usage block, pre-v3 reports).
+    private var usageSummary: String? {
+        var parts: [String] = []
+        if let provider = report.providerUsed, !provider.isEmpty {
+            parts.append(provider)
+        }
+        if let model = report.modelUsed, !model.isEmpty {
+            parts.append(model)
+        }
+        if let total = report.totalTokens, total > 0 {
+            parts.append("\(total) tok")
+        }
+        if let cost = report.usdCost, cost > 0 {
+            parts.append(cost < 0.01 ? "~<$0.01" : String(format: "~$%.3f", cost))
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     @ViewBuilder

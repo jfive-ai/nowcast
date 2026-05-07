@@ -43,10 +43,22 @@ private struct HistoryRow: View {
                 Text(report.window.displayName)
                 Text("·")
                 Text(ByteCountFormatter.string(fromByteCount: report.byteSize, countStyle: .file))
+                if let cost = report.usdCost, cost > 0 {
+                    Text("·")
+                    Text(Self.formatCost(cost))
+                } else if let total = report.totalTokens, total > 0 {
+                    Text("·")
+                    Text("\(total) tok")
+                }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
+    }
+
+    private static func formatCost(_ usd: Double) -> String {
+        if usd < 0.01 { return "<$0.01" }
+        return String(format: "$%.2f", usd)
     }
 }
