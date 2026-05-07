@@ -27,9 +27,8 @@ xcuserdata/
 *.dSYM.zip
 *.dSYM
 
-# Generated Xcode project (we'll regenerate via xcodegen if used)
-# Uncomment if project is generated rather than committed:
-# *.xcodeproj
+# Generated Xcode project — produced by `xcodegen generate` from project.yml
+*.xcodeproj
 
 # Swift Package Manager
 .build/
