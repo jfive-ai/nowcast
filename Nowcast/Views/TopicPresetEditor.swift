@@ -62,11 +62,7 @@ struct TopicPresetEditor: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(original == nil ? "New preset" : "Edit preset")
-                .font(.title2).bold()
-                .padding([.horizontal, .top])
-
+        NavigationStack {
             Form {
                 Section("Basics") {
                     TextField("Name", text: $name)
@@ -132,29 +128,31 @@ struct TopicPresetEditor: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                if !isValid {
+                    Section {
+                        Text(validationHint)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
             .formStyle(.grouped)
-
-            HStack(spacing: 8) {
-                if !isValid {
-                    Text(validationHint)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            .navigationTitle(original == nil ? "New preset" : "Edit preset")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
                 }
-                Spacer()
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button("Save") {
-                    onSave(buildPreset())
-                    dismiss()
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        onSave(buildPreset())
+                        dismiss()
+                    }
+                    .disabled(!isValid)
                 }
-                .buttonStyle(.borderedProminent)
-                .keyboardShortcut(.defaultAction)
-                .disabled(!isValid)
             }
-            .padding()
         }
-        .frame(minWidth: 460, idealWidth: 460, minHeight: 560, idealHeight: 620)
+        .frame(minWidth: 460, idealWidth: 480, minHeight: 560, idealHeight: 640)
     }
 
     private var validationHint: String {
