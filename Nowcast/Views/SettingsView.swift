@@ -3,6 +3,8 @@ import SwiftUI
 struct SettingsView: View {
     @EnvironmentObject private var state: AppState
     @State private var draftKey: String = ""
+    @State private var draftYouTubeKey: String = ""
+    @State private var draftBraveKey: String = ""
     @State private var draftRetention: String = ""
     @State private var savedFlash: Bool = false
 
@@ -16,6 +18,8 @@ struct SettingsView: View {
         .padding()
         .onAppear {
             draftKey = state.openAIAPIKey
+            draftYouTubeKey = state.youtubeAPIKey
+            draftBraveKey = state.braveAPIKey
             draftRetention = String(state.retentionDays)
         }
     }
@@ -28,17 +32,39 @@ struct SettingsView: View {
                 HStack {
                     Button("Save") {
                         state.saveAPIKey(draftKey)
-                        savedFlash = true
-                        Task {
-                            try? await Task.sleep(nanoseconds: 1_500_000_000)
-                            savedFlash = false
-                        }
+                        flashSaved()
                     }
                     .disabled(draftKey == state.openAIAPIKey)
                     if savedFlash {
                         Text("Saved").foregroundStyle(.green).font(.caption)
                     }
                 }
+            }
+
+            Section("YouTube Data API") {
+                SecureField("API key", text: $draftYouTubeKey)
+                    .textFieldStyle(.roundedBorder)
+                Button("Save") {
+                    state.saveYouTubeAPIKey(draftYouTubeKey)
+                    flashSaved()
+                }
+                .disabled(draftYouTubeKey == state.youtubeAPIKey)
+                Text("Required for YouTube search and channel adapters. Free tier: 10k quota / day.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Brave Search API") {
+                SecureField("API key", text: $draftBraveKey)
+                    .textFieldStyle(.roundedBorder)
+                Button("Save") {
+                    state.saveBraveAPIKey(draftBraveKey)
+                    flashSaved()
+                }
+                .disabled(draftBraveKey == state.braveAPIKey)
+                Text("Required for the Web search adapter.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Retention") {
@@ -81,6 +107,14 @@ struct SettingsView: View {
         if let v = Int(draftRetention.trimmingCharacters(in: .whitespaces)), v >= 0 {
             state.retentionDays = v
             state.applyRetention()
+        }
+    }
+
+    private func flashSaved() {
+        savedFlash = true
+        Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            savedFlash = false
         }
     }
 }

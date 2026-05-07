@@ -70,7 +70,7 @@ struct SubscriptionsView: View {
         switch draftKind {
         case .reddit:        return "Subreddit (e.g. ethereum)"
         case .rss:           return "Feed URL"
-        case .youtubeChannel:return "Channel ID or @handle"
+        case .youtubeChannel:return "Channel ID, @handle, or channel URL"
         default:             return "Identifier"
         }
     }
@@ -81,6 +81,8 @@ struct SubscriptionsView: View {
             return "When a Reddit-enabled preset has at least one subreddit subscription, search is restricted to those subreddits."
         case .rss:
             return "RSS subscriptions are fetched on every run; no global search."
+        case .youtubeChannel:
+            return "Pulls the latest uploads from each subscribed channel and best-effort fetches transcripts when available."
         default:
             return ""
         }

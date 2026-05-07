@@ -21,6 +21,14 @@ final class AppState: ObservableObject {
         didSet { rebuildPipeline() }
     }
 
+    @Published var youtubeAPIKey: String {
+        didSet { rebuildPipeline() }
+    }
+
+    @Published var braveAPIKey: String {
+        didSet { rebuildPipeline() }
+    }
+
     /// Days to retain reports. 0 means keep forever.
     @Published var retentionDays: Int {
         didSet { UserDefaults.standard.set(retentionDays, forKey: Self.retentionDaysKey) }
@@ -43,6 +51,8 @@ final class AppState: ObservableObject {
         }
 
         self.openAIAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.openAI) ?? ""
+        self.youtubeAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.youtube) ?? ""
+        self.braveAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.braveSearch) ?? ""
         self.retentionDays = UserDefaults.standard.object(forKey: Self.retentionDaysKey) as? Int
             ?? Self.defaultRetentionDays
 
@@ -65,13 +75,25 @@ final class AppState: ObservableObject {
     // MARK: - Settings
 
     func saveAPIKey(_ key: String) {
+        saveSecret(key, account: KeychainAccount.openAI) { self.openAIAPIKey = $0 }
+    }
+
+    func saveYouTubeAPIKey(_ key: String) {
+        saveSecret(key, account: KeychainAccount.youtube) { self.youtubeAPIKey = $0 }
+    }
+
+    func saveBraveAPIKey(_ key: String) {
+        saveSecret(key, account: KeychainAccount.braveSearch) { self.braveAPIKey = $0 }
+    }
+
+    private func saveSecret(_ key: String, account: String, apply: (String) -> Void) {
         do {
             if key.isEmpty {
-                try KeychainStore.shared.delete(account: KeychainAccount.openAI)
+                try KeychainStore.shared.delete(account: account)
             } else {
-                try KeychainStore.shared.setSecret(key, account: KeychainAccount.openAI)
+                try KeychainStore.shared.setSecret(key, account: account)
             }
-            openAIAPIKey = key
+            apply(key)
         } catch {
             lastError = error.localizedDescription
         }
@@ -236,8 +258,22 @@ final class AppState: ObservableObject {
             return
         }
         let llm = OpenAIClient(apiKey: openAIAPIKey)
+
+        var adapters: [SourceAdapter] = [
+            HackerNewsAdapter(),
+            RedditAdapter(),
+            RSSAdapter(),
+            NewsAdapter(),
+        ]
+        // YouTube + web search adapters only attach when the user has
+        // supplied the corresponding API key — otherwise they would either
+        // 401 or be useless.
+        if !youtubeAPIKey.isEmpty {
+            adapters.append(YouTubeSearchAdapter(apiKey: youtubeAPIKey))
+            adapters.append(YouTubeChannelAdapter(apiKey: youtubeAPIKey))
+        }
         pipeline = ReportPipeline(
-            adapters: [HackerNewsAdapter(), RedditAdapter(), RSSAdapter(), NewsAdapter()],
+            adapters: adapters,
             storage: storage,
             llm: llm
         )
