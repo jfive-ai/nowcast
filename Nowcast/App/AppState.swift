@@ -132,6 +132,13 @@ final class AppState: ObservableObject {
             self?.markRead(reportID: reportID)
         }
         Task { await NotificationManager.shared.requestAuthorization() }
+
+        // Rebuild the Spotlight index from the current report set so it
+        // matches reality even if the user pruned reports while the app
+        // was closed or installed a fresh build.
+        SpotlightIndexer.shared.reindex(reports: reports) { [weak self] report in
+            (try? self?.storage.loadMarkdown(for: report)) ?? ""
+        }
     }
 
     // MARK: - Settings
@@ -211,6 +218,10 @@ final class AppState: ObservableObject {
             )
             refresh()
 
+            // Spotlight donation: searchable from anywhere on the Mac.
+            let markdown = (try? storage.loadMarkdown(for: report)) ?? ""
+            SpotlightIndexer.shared.donate(report: report, markdown: markdown)
+
             if let presetID,
                let preset = presets.first(where: { $0.id == presetID }) {
                 if preset.deliveryChannels.contains(.notification) {
@@ -241,7 +252,8 @@ final class AppState: ObservableObject {
 
     func deleteOldest(_ n: Int = 10) {
         do {
-            try storage.deleteOldestReports(count: n)
+            let removed = try storage.deleteOldestReports(count: n)
+            SpotlightIndexer.shared.remove(reportIDs: removed)
             refresh()
         } catch {
             lastError = error.localizedDescription
@@ -252,7 +264,8 @@ final class AppState: ObservableObject {
         guard retentionDays > 0 else { return }
         let cutoff = Date().addingTimeInterval(-Double(retentionDays) * 86_400)
         do {
-            try storage.deleteReports(olderThan: cutoff)
+            let removed = try storage.deleteReports(olderThan: cutoff)
+            SpotlightIndexer.shared.remove(reportIDs: removed)
             try storage.pruneSeenItems()
             refresh()
         } catch {

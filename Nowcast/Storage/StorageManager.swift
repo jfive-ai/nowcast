@@ -116,10 +116,12 @@ final class StorageManager {
         }
     }
 
-    /// Delete the N oldest reports (DB row + markdown file). Returns count deleted.
+    /// Delete the N oldest reports (DB row + markdown file). Returns the
+    /// deleted IDs so callers can mirror the change in side indexes
+    /// (Spotlight, etc.).
     @discardableResult
-    func deleteOldestReports(count: Int) throws -> Int {
-        guard count > 0 else { return 0 }
+    func deleteOldestReports(count: Int) throws -> [UUID] {
+        guard count > 0 else { return [] }
         let oldest = try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
@@ -130,12 +132,12 @@ final class StorageManager {
                 """, arguments: [count]).compactMap(Self.makeReport)
         }
         try delete(reports: oldest)
-        return oldest.count
+        return oldest.map(\.id)
     }
 
-    /// Delete reports older than `cutoff`. Returns count deleted.
+    /// Delete reports older than `cutoff`. Returns the deleted IDs.
     @discardableResult
-    func deleteReports(olderThan cutoff: Date) throws -> Int {
+    func deleteReports(olderThan cutoff: Date) throws -> [UUID] {
         let stale = try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
@@ -145,7 +147,7 @@ final class StorageManager {
                 """, arguments: [cutoff]).compactMap(Self.makeReport)
         }
         try delete(reports: stale)
-        return stale.count
+        return stale.map(\.id)
     }
 
     private func delete(reports: [Report]) throws {
