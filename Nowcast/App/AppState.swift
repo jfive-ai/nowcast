@@ -277,6 +277,20 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: - Sidebar selection (P4-6)
+
+    enum SidebarSection: String, Hashable {
+        case history
+        case search
+    }
+    @Published var sidebarSelection: SidebarSection = .history
+
+    // MARK: - Search (P4-6)
+
+    func searchReports(_ query: String) -> [StorageManager.SearchHit] {
+        (try? storage.searchReports(query)) ?? []
+    }
+
     // MARK: - Source health (P4-5)
 
     func sourceHealthRows(days: Int = 30) throws -> [SourceHealth] {
