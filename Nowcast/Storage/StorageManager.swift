@@ -471,6 +471,77 @@ final class StorageManager {
         }
     }
 
+    // MARK: - Source runs / health (v7)
+
+    func recordSourceRun(_ run: SourceRun) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO source_run
+                  (id, report_id, source_kind, started_at, finished_at,
+                   items_returned, items_fresh, error_message)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, arguments: [
+                    run.id.uuidString,
+                    run.reportID.uuidString,
+                    run.sourceKind.rawValue,
+                    run.startedAt,
+                    run.finishedAt,
+                    run.itemsReturned,
+                    run.itemsFresh,
+                    run.errorMessage,
+                ])
+        }
+    }
+
+    func sourceHealth(days: Int = 30) throws -> [SourceHealth] {
+        let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
+        return try dbQueue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT source_kind,
+                       COUNT(*) AS runs,
+                       SUM(CASE WHEN error_message IS NULL THEN 1 ELSE 0 END) AS successes,
+                       COALESCE(SUM(items_returned), 0) AS total_returned,
+                       COALESCE(SUM(items_fresh), 0) AS total_fresh,
+                       AVG(CASE WHEN finished_at IS NOT NULL
+                                THEN (julianday(finished_at) - julianday(started_at)) * 86400.0
+                                ELSE NULL END) AS avg_latency,
+                       MAX(started_at) AS last_run_at
+                FROM source_run
+                WHERE started_at >= ?
+                GROUP BY source_kind
+                ORDER BY source_kind
+                """, arguments: [cutoff])
+            return rows.compactMap { row -> SourceHealth? in
+                guard let kindRaw: String = row["source_kind"],
+                      let kind = SourceKind(rawValue: kindRaw),
+                      let runs: Int = row["runs"]
+                else { return nil }
+                let successes: Int = row["successes"] ?? 0
+                let totalReturned: Int = row["total_returned"] ?? 0
+                let totalFresh: Int = row["total_fresh"] ?? 0
+                let avgLatency: Double? = row["avg_latency"]
+                let lastRunAt: Date? = row["last_run_at"]
+
+                let lastError: String? = (try? String.fetchOne(db, sql: """
+                    SELECT error_message FROM source_run
+                    WHERE source_kind = ? AND error_message IS NOT NULL
+                    ORDER BY started_at DESC LIMIT 1
+                    """, arguments: [kindRaw])) ?? nil
+
+                return SourceHealth(
+                    sourceKind: kind,
+                    runs: runs,
+                    successes: successes,
+                    totalReturned: totalReturned,
+                    totalFresh: totalFresh,
+                    avgLatencySeconds: avgLatency,
+                    lastError: lastError,
+                    lastRunAt: lastRunAt
+                )
+            }
+        }
+    }
+
     // MARK: - Feedback (v6)
 
     func recordFeedback(_ feedback: Feedback) throws {
