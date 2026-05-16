@@ -471,6 +471,81 @@ final class StorageManager {
         }
     }
 
+    // MARK: - Full-text search (v8)
+
+    /// Re-index a report's row in `report_fts`. Idempotent — deletes any
+    /// prior row for this report first.
+    func indexReportForSearch(_ reportID: UUID, topic: String, body: String) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM report_fts WHERE report_id = ?",
+                           arguments: [reportID.uuidString])
+            try db.execute(sql: """
+                INSERT INTO report_fts (report_id, topic, body)
+                VALUES (?, ?, ?)
+                """, arguments: [reportID.uuidString, topic, body])
+        }
+    }
+
+    func indexItemsForSearch(_ items: [PersistedItem]) throws {
+        guard !items.isEmpty else { return }
+        try dbQueue.write { db in
+            for item in items {
+                try db.execute(sql: "DELETE FROM item_fts WHERE item_id = ?",
+                               arguments: [item.id.uuidString])
+                try db.execute(sql: """
+                    INSERT INTO item_fts (item_id, title, snippet)
+                    VALUES (?, ?, ?)
+                    """, arguments: [item.id.uuidString, item.title, item.snippet ?? ""])
+            }
+        }
+    }
+
+    struct SearchHit: Hashable, Identifiable {
+        let reportID: UUID
+        let topic: String
+        let snippet: String
+        let kind: HitKind
+        var id: String { "\(reportID.uuidString)-\(kind.rawValue)" }
+        enum HitKind: String { case report, item }
+    }
+
+    func searchReports(_ query: String, limit: Int = 50) throws -> [SearchHit] {
+        let cleaned = Self.sanitizeFTSQuery(query)
+        guard !cleaned.isEmpty else { return [] }
+        return try dbQueue.read { db in
+            let reportRows = try Row.fetchAll(db, sql: """
+                SELECT report_id, topic, snippet(report_fts, 2, '<<', '>>', '…', 12) AS snip
+                FROM report_fts
+                WHERE report_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?
+                """, arguments: [cleaned, limit])
+            return reportRows.compactMap { r -> SearchHit? in
+                guard let rid: String = r["report_id"], let uuid = UUID(uuidString: rid),
+                      let topic: String = r["topic"]
+                else { return nil }
+                let snip: String = r["snip"] ?? ""
+                return SearchHit(reportID: uuid, topic: topic, snippet: snip, kind: .report)
+            }
+        }
+    }
+
+    /// FTS5 punctuation can crash the query; escape user input and AND-join words.
+    private static func sanitizeFTSQuery(_ query: String) -> String {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return "" }
+        let cleaned = trimmed.unicodeScalars.map { scalar -> Character in
+            CharacterSet.alphanumerics.contains(scalar) ? Character(scalar) : " "
+        }.reduce(into: "", { $0.append($1) })
+        let tokens = cleaned
+            .split(separator: " ")
+            .map(String.init)
+            .filter { !$0.isEmpty }
+        guard !tokens.isEmpty else { return "" }
+        // Quote each token to suppress FTS5 column-filter / operator parsing.
+        return tokens.map { "\"\($0)\"" }.joined(separator: " AND ")
+    }
+
     // MARK: - Source runs / health (v7)
 
     func recordSourceRun(_ run: SourceRun) throws {
