@@ -82,12 +82,22 @@ final class AppState: ObservableObject {
         didSet { UserDefaults.standard.set(retentionDays, forKey: Self.retentionDaysKey) }
     }
 
+    /// Fan-out the user's topic into 2-4 sub-queries before fetching.
+    /// Costs one extra (cheap) LLM call per run. P4-9.
+    @Published var queryRewritingEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(queryRewritingEnabled, forKey: Self.queryRewritingKey)
+            rebuildPipeline()
+        }
+    }
+
     let storage: StorageManager
     private let scheduler = BackgroundScheduler()
 
     private(set) var pipeline: ReportPipeline?
 
     static let retentionDaysKey = "nowcast.retention_days"
+    static let queryRewritingKey = "nowcast.query_rewriting_enabled"
     static let defaultRetentionDays = 30
     static let llmProviderKey = "nowcast.llm.provider"
     static let openAIModelKey = "nowcast.llm.openai.model"
@@ -111,6 +121,7 @@ final class AppState: ObservableObject {
         self.smtpSettings = SMTPSettingsStore.shared.load()
         self.retentionDays = UserDefaults.standard.object(forKey: Self.retentionDaysKey) as? Int
             ?? Self.defaultRetentionDays
+        self.queryRewritingEnabled = UserDefaults.standard.object(forKey: Self.queryRewritingKey) as? Bool ?? false
 
         let providerRaw = UserDefaults.standard.string(forKey: Self.llmProviderKey) ?? LLMProvider.openAI.rawValue
         self.llmProvider = LLMProvider(rawValue: providerRaw) ?? .openAI
@@ -489,7 +500,8 @@ final class AppState: ObservableObject {
             adapters: adapters,
             storage: storage,
             llm: llm,
-            model: activeModelOverride
+            model: activeModelOverride,
+            queryRewritingEnabled: queryRewritingEnabled
         )
     }
 

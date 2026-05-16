@@ -8,14 +8,20 @@ final class ReportPipeline {
     private let storage: StorageManager
     private let llm: LLMClient
     private let model: String?
+    private let queryRewritingEnabled: Bool
 
-    init(adapters: [SourceAdapter], storage: StorageManager, llm: LLMClient, model: String? = nil) {
+    init(adapters: [SourceAdapter],
+         storage: StorageManager,
+         llm: LLMClient,
+         model: String? = nil,
+         queryRewritingEnabled: Bool = false) {
         var map: [SourceKind: SourceAdapter] = [:]
         for adapter in adapters { map[adapter.kind] = adapter }
         self.adapters = map
         self.storage = storage
         self.llm = llm
         self.model = model
+        self.queryRewritingEnabled = queryRewritingEnabled
     }
 
     /// Generate a report. Throws if no items are found at all (caller decides
@@ -25,11 +31,22 @@ final class ReportPipeline {
                   sources: [SourceKind],
                   presetID: UUID? = nil,
                   subscriptions: [SourceSubscription] = []) async throws -> Report {
-        // 1. Fetch from each requested adapter in parallel. Each task
-        //    records its own outcome (start time, finish time, count,
-        //    error) for the source-health panel (P4-5).
+        // 0. Optionally fan out the topic into 2-4 sub-queries. Single-
+        //    token topics or rewriter-disabled config: just use the topic.
+        let subQueries: [String]
+        if queryRewritingEnabled, QueryRewriter.shouldRewrite(topic: topic) {
+            let rewriter = QueryRewriter(llm: llm, model: model)
+            subQueries = await rewriter.rewrite(topic: topic)
+        } else {
+            subQueries = [topic]
+        }
+
+        // 1. Fetch from each requested adapter × each sub-query in
+        //    parallel. Each task records its own outcome (start, finish,
+        //    count, error) for the source-health panel (P4-5).
         struct FetchOutcome {
             let kind: SourceKind
+            let query: String
             let items: [RawItem]
             let startedAt: Date
             let finishedAt: Date
@@ -38,29 +55,33 @@ final class ReportPipeline {
         let outcomes: [FetchOutcome] = await withTaskGroup(of: FetchOutcome.self) { group in
             for kind in sources {
                 guard let adapter = adapters[kind] else { continue }
-                group.addTask {
-                    let started = Date()
-                    do {
-                        let items = try await adapter.fetch(
-                            query: topic,
-                            window: window,
-                            subscriptions: subscriptions.filter { $0.kind == kind }
-                        )
-                        return FetchOutcome(
-                            kind: kind,
-                            items: items,
-                            startedAt: started,
-                            finishedAt: Date(),
-                            errorMessage: nil
-                        )
-                    } catch {
-                        return FetchOutcome(
-                            kind: kind,
-                            items: [],
-                            startedAt: started,
-                            finishedAt: Date(),
-                            errorMessage: error.localizedDescription
-                        )
+                for subQuery in subQueries {
+                    group.addTask {
+                        let started = Date()
+                        do {
+                            let items = try await adapter.fetch(
+                                query: subQuery,
+                                window: window,
+                                subscriptions: subscriptions.filter { $0.kind == kind }
+                            )
+                            return FetchOutcome(
+                                kind: kind,
+                                query: subQuery,
+                                items: items,
+                                startedAt: started,
+                                finishedAt: Date(),
+                                errorMessage: nil
+                            )
+                        } catch {
+                            return FetchOutcome(
+                                kind: kind,
+                                query: subQuery,
+                                items: [],
+                                startedAt: started,
+                                finishedAt: Date(),
+                                errorMessage: error.localizedDescription
+                            )
+                        }
                     }
                 }
             }
