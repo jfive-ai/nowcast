@@ -267,6 +267,94 @@ final class StorageManager {
         }
     }
 
+    // MARK: - Persisted items (v4)
+
+    /// Insert any of `items` whose `url_hash` isn't already present, and
+    /// return the canonical row IDs (existing or new) keyed by `url_hash`.
+    @discardableResult
+    func upsertItems(_ items: [RawItem]) throws -> [String: UUID] {
+        guard !items.isEmpty else { return [:] }
+        return try dbQueue.write { db in
+            var result: [String: UUID] = [:]
+            for raw in items {
+                let persisted = PersistedItem(from: raw)
+                if let existing = try Row.fetchOne(db,
+                    sql: "SELECT id FROM item WHERE url_hash = ? LIMIT 1",
+                    arguments: [persisted.urlHash]) {
+                    if let idString: String = existing["id"], let uuid = UUID(uuidString: idString) {
+                        result[persisted.urlHash] = uuid
+                    }
+                    continue
+                }
+                try db.execute(sql: """
+                    INSERT INTO item
+                      (id, canonical_url, url_hash, title, snippet, transcript,
+                       source_kind, author, published_at, first_seen_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, arguments: [
+                        persisted.id.uuidString,
+                        persisted.canonicalURL.absoluteString,
+                        persisted.urlHash,
+                        persisted.title,
+                        persisted.snippet,
+                        persisted.transcript,
+                        persisted.sourceKind.rawValue,
+                        persisted.author,
+                        persisted.publishedAt,
+                        persisted.firstSeenAt,
+                    ])
+                result[persisted.urlHash] = persisted.id
+            }
+            return result
+        }
+    }
+
+    /// Link each item to a report. `freshHashes` are the items that did NOT
+    /// appear in any earlier report — they get `is_fresh = 1`; everything
+    /// else is `is_fresh = 0` (context items surfaced again).
+    func attachItemsToReport(_ reportID: UUID,
+                             itemIDsByHash: [String: UUID],
+                             freshHashes: Set<String>) throws {
+        guard !itemIDsByHash.isEmpty else { return }
+        try dbQueue.write { db in
+            for (hash, itemID) in itemIDsByHash {
+                let isFresh = freshHashes.contains(hash) ? 1 : 0
+                try db.execute(sql: """
+                    INSERT OR IGNORE INTO report_item (report_id, item_id, is_fresh)
+                    VALUES (?, ?, ?)
+                    """, arguments: [reportID.uuidString, itemID.uuidString, isFresh])
+            }
+        }
+    }
+
+    /// Items linked to a given report, ordered by source kind then title.
+    func itemsForReport(_ reportID: UUID) throws -> [PersistedItem] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT i.id, i.canonical_url, i.url_hash, i.title, i.snippet, i.transcript,
+                       i.source_kind, i.author, i.published_at, i.first_seen_at
+                FROM item i
+                JOIN report_item ri ON ri.item_id = i.id
+                WHERE ri.report_id = ?
+                ORDER BY i.source_kind ASC, i.title ASC
+                """, arguments: [reportID.uuidString]).compactMap(Self.makePersistedItem)
+        }
+    }
+
+    /// Total persisted-item count. Used by the Settings debug readout.
+    func totalItemCount() throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM item") ?? 0
+        }
+    }
+
+    /// Total report-item link count. Used by the Settings debug readout.
+    func totalReportItemCount() throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM report_item") ?? 0
+        }
+    }
+
     // MARK: - Seen-item dedup
 
     /// Returns only items whose URL hashes haven't been recorded for this preset.
@@ -389,6 +477,31 @@ final class StorageManager {
             deliveryChannels: delivery,
             createdAt: createdAt,
             lastRunAt: lastRun
+        )
+    }
+
+    private static func makePersistedItem(from row: Row) -> PersistedItem? {
+        guard let idString: String = row["id"],
+              let id = UUID(uuidString: idString),
+              let canonicalString: String = row["canonical_url"],
+              let canonical = URL(string: canonicalString),
+              let urlHash: String = row["url_hash"],
+              let title: String = row["title"],
+              let sourceKindRaw: String = row["source_kind"],
+              let sourceKind = SourceKind(rawValue: sourceKindRaw),
+              let firstSeenAt: Date = row["first_seen_at"]
+        else { return nil }
+        return PersistedItem(
+            id: id,
+            canonicalURL: canonical,
+            urlHash: urlHash,
+            title: title,
+            snippet: row["snippet"],
+            transcript: row["transcript"],
+            sourceKind: sourceKind,
+            author: row["author"],
+            publishedAt: row["published_at"],
+            firstSeenAt: firstSeenAt
         )
     }
 

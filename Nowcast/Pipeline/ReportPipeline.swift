@@ -58,6 +58,12 @@ final class ReportPipeline {
             throw PipelineError.noFreshItems
         }
 
+        // 2b. Materialize every surviving item into the `item` table so we
+        //     can build downstream features (diff, timeline, trust, search)
+        //     on a real per-item history instead of throwaway markdown.
+        let itemIDsByHash = (try? storage.upsertItems(withinRunUnique)) ?? [:]
+        let freshHashes = Set(fresh.map(\.urlHash))
+
         // 3. Build prompt and call the LLM.
         let prompt = BriefingPrompt.render(topic: topic, window: window, items: fresh)
         let response = try await llm.summarize(prompt: prompt, model: model)
@@ -89,6 +95,11 @@ final class ReportPipeline {
 
         // 5. Only now record the items as seen — guarantees retry-on-failure.
         try storage.recordSeen(fresh, presetID: presetID)
+
+        // 6. Link items to this report so future runs / views can find them.
+        try? storage.attachItemsToReport(stored.id,
+                                         itemIDsByHash: itemIDsByHash,
+                                         freshHashes: freshHashes)
 
         return stored
     }
