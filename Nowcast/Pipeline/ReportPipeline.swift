@@ -25,27 +25,50 @@ final class ReportPipeline {
                   sources: [SourceKind],
                   presetID: UUID? = nil,
                   subscriptions: [SourceSubscription] = []) async throws -> Report {
-        // 1. Fetch from each requested adapter in parallel.
-        let collected: [RawItem] = try await withThrowingTaskGroup(of: [RawItem].self) { group in
+        // 1. Fetch from each requested adapter in parallel. Each task
+        //    records its own outcome (start time, finish time, count,
+        //    error) for the source-health panel (P4-5).
+        struct FetchOutcome {
+            let kind: SourceKind
+            let items: [RawItem]
+            let startedAt: Date
+            let finishedAt: Date
+            let errorMessage: String?
+        }
+        let outcomes: [FetchOutcome] = await withTaskGroup(of: FetchOutcome.self) { group in
             for kind in sources {
                 guard let adapter = adapters[kind] else { continue }
                 group.addTask {
+                    let started = Date()
                     do {
-                        return try await adapter.fetch(
+                        let items = try await adapter.fetch(
                             query: topic,
                             window: window,
                             subscriptions: subscriptions.filter { $0.kind == kind }
                         )
+                        return FetchOutcome(
+                            kind: kind,
+                            items: items,
+                            startedAt: started,
+                            finishedAt: Date(),
+                            errorMessage: nil
+                        )
                     } catch {
-                        // One failed adapter shouldn't fail the whole report.
-                        return []
+                        return FetchOutcome(
+                            kind: kind,
+                            items: [],
+                            startedAt: started,
+                            finishedAt: Date(),
+                            errorMessage: error.localizedDescription
+                        )
                     }
                 }
             }
-            var all: [RawItem] = []
-            for try await chunk in group { all.append(contentsOf: chunk) }
+            var all: [FetchOutcome] = []
+            for await outcome in group { all.append(outcome) }
             return all
         }
+        let collected: [RawItem] = outcomes.flatMap(\.items)
 
         // 2. Dedupe within this run by URL hash, then against persistent seen-index.
         //    Note: we *check* the seen-index but do not record yet — recording
@@ -142,6 +165,23 @@ final class ReportPipeline {
         //    not user-visible.
         if let validated = validatedResult {
             try? storage.saveBriefing(validated, reportID: stored.id)
+        }
+
+        // 8. Record per-adapter outcomes for the source health panel.
+        let freshURLHashSet = Set(fresh.map(\.urlHash))
+        for outcome in outcomes {
+            let freshCount = outcome.items.filter { freshURLHashSet.contains($0.urlHash) }.count
+            let row = SourceRun(
+                id: UUID(),
+                reportID: stored.id,
+                sourceKind: outcome.kind,
+                startedAt: outcome.startedAt,
+                finishedAt: outcome.finishedAt,
+                itemsReturned: outcome.items.count,
+                itemsFresh: freshCount,
+                errorMessage: outcome.errorMessage
+            )
+            try? storage.recordSourceRun(row)
         }
 
         return stored
