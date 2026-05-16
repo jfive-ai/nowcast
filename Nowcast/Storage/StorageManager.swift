@@ -404,6 +404,73 @@ final class StorageManager {
         }
     }
 
+    /// Load the clusters (+ claims) for a given report, ordered by `ord`.
+    func clusters(for reportID: UUID) throws -> [BriefingResult.Cluster] {
+        try dbQueue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                SELECT id, headline, summary, ord, citations_json
+                FROM cluster
+                WHERE report_id = ?
+                ORDER BY ord ASC
+                """, arguments: [reportID.uuidString])
+            var out: [BriefingResult.Cluster] = []
+            for row in rows {
+                guard let cid: String = row["id"],
+                      let headline: String = row["headline"],
+                      let summary: String = row["summary"],
+                      let citationsJSON: String = row["citations_json"]
+                else { continue }
+                let citations: [String] = (try? decodeJSON(citationsJSON)) ?? []
+                let claimRows = try Row.fetchAll(db, sql: """
+                    SELECT text, citations_json
+                    FROM claim
+                    WHERE cluster_id = ?
+                    ORDER BY ord ASC
+                    """, arguments: [cid])
+                let claims: [BriefingResult.Claim] = claimRows.compactMap { r in
+                    guard let text: String = r["text"],
+                          let cj: String = r["citations_json"] else { return nil }
+                    let cits: [String] = (try? decodeJSON(cj)) ?? []
+                    return BriefingResult.Claim(text: text, citations: cits)
+                }
+                out.append(BriefingResult.Cluster(
+                    id: cid,
+                    headline: headline,
+                    summary: summary,
+                    claims: claims,
+                    citations: citations
+                ))
+            }
+            return out
+        }
+    }
+
+    /// The most-recent earlier report for the given preset OR (if no preset)
+    /// for the same topic string. Returns nil if no such report exists.
+    func mostRecentPriorReport(presetID: UUID?, topic: String, before generatedAt: Date) throws -> Report? {
+        try dbQueue.read { db in
+            let row: Row?
+            if let presetID {
+                row = try Row.fetchOne(db, sql: """
+                    SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
+                           prompt_tokens, completion_tokens, usd_cost, model_used, provider_used
+                    FROM report
+                    WHERE preset_id = ? AND generated_at < ?
+                    ORDER BY generated_at DESC LIMIT 1
+                    """, arguments: [presetID.uuidString, generatedAt])
+            } else {
+                row = try Row.fetchOne(db, sql: """
+                    SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
+                           prompt_tokens, completion_tokens, usd_cost, model_used, provider_used
+                    FROM report
+                    WHERE preset_id IS NULL AND topic = ? AND generated_at < ?
+                    ORDER BY generated_at DESC LIMIT 1
+                    """, arguments: [topic, generatedAt])
+            }
+            return row.flatMap(Self.makeReport)
+        }
+    }
+
     // MARK: - Seen-item dedup
 
     /// Returns only items whose URL hashes haven't been recorded for this preset.
@@ -573,5 +640,9 @@ final class StorageManager {
     private static func decodeJSON<T: Decodable>(_ json: String) throws -> T {
         let data = Data(json.utf8)
         return try JSONDecoder().decode(T.self, from: data)
+    }
+
+    private func decodeJSON<T: Decodable>(_ json: String) throws -> T {
+        try Self.decodeJSON(json)
     }
 }
