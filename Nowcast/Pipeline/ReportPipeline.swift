@@ -64,8 +64,17 @@ final class ReportPipeline {
         let itemIDsByHash = (try? storage.upsertItems(withinRunUnique)) ?? [:]
         let freshHashes = Set(fresh.map(\.urlHash))
 
-        // 3. Build prompt and call the LLM.
-        let prompt = BriefingPrompt.render(topic: topic, window: window, items: fresh)
+        // 3. Build prompt and call the LLM. If the user has dismissed
+        //    clusters in the last 30 days, ask the model to deprioritize
+        //    similar headlines (P4-4 personalization hint — mild signal).
+        let avoidHint: String? = (try? storage.recentDismissedHeadlines())
+            .flatMap(PreferenceHint.build(from:))
+        let prompt = BriefingPrompt.render(
+            topic: topic,
+            window: window,
+            items: fresh,
+            avoidHint: avoidHint
+        )
         let response = try await llm.summarize(prompt: prompt, model: model)
 
         // 3b. Try to extract the structured trailing JSON block. If the

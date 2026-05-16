@@ -131,6 +131,21 @@ enum Schema {
             try db.create(indexOn: "claim", columns: ["cluster_id"])
         }
 
+        // v6: per-target feedback rows (P4-4). `target` discriminates
+        // between report-level and cluster-level feedback; `target_id`
+        // refers to `report.id` or `cluster.id` accordingly.
+        m.registerMigration("v6") { db in
+            try db.create(table: "feedback") { t in
+                t.column("id", .text).primaryKey()
+                t.column("target", .text).notNull()
+                t.column("target_id", .text).notNull()
+                t.column("kind", .text).notNull()
+                t.column("note", .text)
+                t.column("created_at", .datetime).notNull().indexed()
+            }
+            try db.create(indexOn: "feedback", columns: ["target", "target_id"])
+        }
+
         return m
     }
 
