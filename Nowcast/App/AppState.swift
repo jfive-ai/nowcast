@@ -91,6 +91,15 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Second-pass LLM scan over the brief's claims for cross-source
+    /// disagreement. Costs one extra LLM call. P4-10.
+    @Published var contradictionDetectionEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(contradictionDetectionEnabled, forKey: Self.contradictionDetectionKey)
+            rebuildPipeline()
+        }
+    }
+
     let storage: StorageManager
     private let scheduler = BackgroundScheduler()
 
@@ -98,6 +107,7 @@ final class AppState: ObservableObject {
 
     static let retentionDaysKey = "nowcast.retention_days"
     static let queryRewritingKey = "nowcast.query_rewriting_enabled"
+    static let contradictionDetectionKey = "nowcast.contradiction_detection_enabled"
     static let defaultRetentionDays = 30
     static let llmProviderKey = "nowcast.llm.provider"
     static let openAIModelKey = "nowcast.llm.openai.model"
@@ -122,6 +132,7 @@ final class AppState: ObservableObject {
         self.retentionDays = UserDefaults.standard.object(forKey: Self.retentionDaysKey) as? Int
             ?? Self.defaultRetentionDays
         self.queryRewritingEnabled = UserDefaults.standard.object(forKey: Self.queryRewritingKey) as? Bool ?? false
+        self.contradictionDetectionEnabled = UserDefaults.standard.object(forKey: Self.contradictionDetectionKey) as? Bool ?? false
 
         let providerRaw = UserDefaults.standard.string(forKey: Self.llmProviderKey) ?? LLMProvider.openAI.rawValue
         self.llmProvider = LLMProvider(rawValue: providerRaw) ?? .openAI
@@ -501,7 +512,8 @@ final class AppState: ObservableObject {
             storage: storage,
             llm: llm,
             model: activeModelOverride,
-            queryRewritingEnabled: queryRewritingEnabled
+            queryRewritingEnabled: queryRewritingEnabled,
+            contradictionDetectionEnabled: contradictionDetectionEnabled
         )
     }
 
