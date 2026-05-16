@@ -70,6 +70,39 @@ enum Schema {
             }
         }
 
+        // v4: per-item persistence. Every RawItem that survives in-run dedup
+        // is upserted into `item`, then linked to its parent report via
+        // `report_item`. Foundation for diff, timeline, source-trust, and
+        // analytics features (see issue #15 / P4-1).
+        m.registerMigration("v4") { db in
+            try db.create(table: "item") { t in
+                t.column("id", .text).primaryKey()
+                t.column("canonical_url", .text).notNull()
+                t.column("url_hash", .text).notNull().indexed()
+                t.column("title", .text).notNull()
+                t.column("snippet", .text)
+                t.column("transcript", .text)
+                t.column("source_kind", .text).notNull()
+                t.column("author", .text)
+                t.column("published_at", .datetime)
+                t.column("first_seen_at", .datetime).notNull()
+                t.uniqueKey(["url_hash"])
+            }
+            try db.create(indexOn: "item", columns: ["published_at"])
+
+            try db.create(table: "report_item") { t in
+                t.column("report_id", .text)
+                    .notNull()
+                    .references("report", onDelete: .cascade)
+                t.column("item_id", .text)
+                    .notNull()
+                    .references("item", onDelete: .cascade)
+                t.column("is_fresh", .integer).notNull().defaults(to: 1)
+                t.primaryKey(["report_id", "item_id"])
+            }
+            try db.create(indexOn: "report_item", columns: ["item_id"])
+        }
+
         return m
     }
 

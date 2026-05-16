@@ -117,6 +117,22 @@ struct SettingsView: View {
                     state.deleteOldest(10)
                 }
                 .disabled(state.reports.isEmpty)
+                HStack {
+                    Text("Items persisted")
+                        .help("Number of unique source items the app has captured across all reports. Used for diff, search, and trust signals.")
+                    Spacer()
+                    Text("\(state.totalItemCount)")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+                HStack {
+                    Text("Report ↔ item links")
+                        .help("How many report→item edges exist in the database.")
+                    Spacer()
+                    Text("\(state.totalReportItemCount)")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
             }
         }
         .formStyle(.grouped)

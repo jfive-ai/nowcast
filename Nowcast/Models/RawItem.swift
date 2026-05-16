@@ -11,9 +11,10 @@ struct RawItem: Hashable, Codable {
     let sourceKind: SourceKind
     let author: String?
 
-    /// Stable hash of the URL — used for `seen_item` dedup so the same story
-    /// isn't summarized twice across runs.
+    /// Stable hash of the canonicalized URL — used for `seen_item` dedup so
+    /// the same story isn't summarized twice across runs even when the URL
+    /// differs by trailing slash, tracker params, mobile-prefix host, etc.
     var urlHash: String {
-        url.absoluteString.lowercased()
+        URLCanonicalizer.hash(url)
     }
 }
