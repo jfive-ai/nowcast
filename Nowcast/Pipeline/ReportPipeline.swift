@@ -76,10 +76,28 @@ final class ReportPipeline {
             CitationValidator.filter($0, againstInputs: fresh)
         }
 
+        // 3c. If we have structured clusters, compute the diff against the
+        //     most-recent prior report (same preset, or same topic when ad-
+        //     hoc). Skip silently if no prior exists or no structured data.
+        let now = Date()
+        let diffSection: String? = {
+            guard let current = validatedResult, !current.clusters.isEmpty else { return nil }
+            guard let prior = try? storage.mostRecentPriorReport(
+                presetID: presetID,
+                topic: topic,
+                before: now
+            ) else { return nil }
+            let priorClusters = (try? storage.clusters(for: prior.id)) ?? []
+            guard !priorClusters.isEmpty else { return nil }
+            let delta = BriefDiff.diff(current: current.clusters, prior: priorClusters)
+            return BriefDiff.renderMarkdown(delta)
+        }()
+
         // 4. Wrap with a header and persist.
         let header = Self.headerMarkdown(topic: topic, window: window, fresh: fresh.count, total: collected.count)
         let visibleBody = extracted.result == nil ? response.text : extracted.markdown
-        let markdown = header + "\n\n" + visibleBody
+        let diffPrefix = diffSection.map { $0 + "\n\n" } ?? ""
+        let markdown = header + "\n\n" + diffPrefix + visibleBody
 
         let usdCost = response.usage.flatMap {
             ModelPricing.cost(forModel: response.model, usage: $0)
@@ -89,7 +107,7 @@ final class ReportPipeline {
             presetID: presetID,
             topic: topic,
             window: window,
-            generatedAt: Date(),
+            generatedAt: now,
             markdownPath: "",
             byteSize: Int64(markdown.utf8.count),
             sourceCount: fresh.count,
