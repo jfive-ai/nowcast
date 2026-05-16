@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct ReportView: View {
     @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var audio: AudioBriefPlayer
     let report: Report
 
     @State private var markdown: String = ""
@@ -64,6 +65,8 @@ struct ReportView: View {
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                audioButton
+
                 feedbackToggle(.thumbsUp)
                 feedbackToggle(.thumbsDown)
                 feedbackToggle(.hallucination)
@@ -84,6 +87,31 @@ struct ReportView: View {
                 .disabled(markdown.isEmpty)
             }
         }
+    }
+
+    // MARK: - Audio
+
+    @ViewBuilder
+    private var audioButton: some View {
+        let playing = audio.isPlaying(reportID: report.id)
+        let paused = audio.isPaused(reportID: report.id)
+        Button {
+            if playing {
+                audio.pause()
+            } else if paused {
+                audio.play(reportID: report.id, markdown: markdown)
+            } else {
+                audio.play(reportID: report.id, markdown: markdown)
+            }
+        } label: {
+            Label(
+                playing ? "Pause" : (paused ? "Resume" : "Play"),
+                systemImage: playing ? "pause.fill" : (paused ? "play.fill" : "play")
+            )
+            .foregroundStyle(playing || paused ? Color.accentColor : .secondary)
+        }
+        .help("Listen to this brief")
+        .disabled(markdown.isEmpty)
     }
 
     // MARK: - Feedback
