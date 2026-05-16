@@ -21,6 +21,8 @@ struct SettingsView: View {
                 .tabItem { Label("Sources", systemImage: "list.bullet.rectangle") }
             SourceHealthView()
                 .tabItem { Label("Health", systemImage: "waveform.path.ecg") }
+            AnalyticsView()
+                .tabItem { Label("Analytics", systemImage: "chart.bar.xaxis") }
             NitterMirrorsView()
                 .tabItem { Label("Nitter", systemImage: "network") }
             EmailSettingsView()
