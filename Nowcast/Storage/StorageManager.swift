@@ -471,6 +471,71 @@ final class StorageManager {
         }
     }
 
+    // MARK: - Feedback (v6)
+
+    func recordFeedback(_ feedback: Feedback) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO feedback (id, target, target_id, kind, note, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, arguments: [
+                    feedback.id.uuidString,
+                    feedback.target.rawValue,
+                    feedback.targetID,
+                    feedback.kind.rawValue,
+                    feedback.note,
+                    feedback.createdAt,
+                ])
+        }
+    }
+
+    func deleteFeedback(target: Feedback.Target, targetID: String, kind: Feedback.Kind) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                DELETE FROM feedback
+                WHERE target = ? AND target_id = ? AND kind = ?
+                """, arguments: [target.rawValue, targetID, kind.rawValue])
+        }
+    }
+
+    func feedback(target: Feedback.Target, targetID: String) throws -> [Feedback] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT id, target, target_id, kind, note, created_at
+                FROM feedback
+                WHERE target = ? AND target_id = ?
+                ORDER BY created_at DESC
+                """, arguments: [target.rawValue, targetID]).compactMap(Self.makeFeedback)
+        }
+    }
+
+    /// Cluster IDs the user has explicitly starred. Used by the sidebar
+    /// "Starred" entry.
+    func starredClusterIDs() throws -> [String] {
+        try dbQueue.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT target_id FROM feedback
+                WHERE target = 'cluster' AND kind = 'star'
+                ORDER BY created_at DESC
+                """)
+        }
+    }
+
+    /// Headlines of clusters the user dismissed within the last `days` days,
+    /// in newest-first order. Feeds the "avoid these themes" prompt hint.
+    func recentDismissedHeadlines(days: Int = 30, limit: Int = 10) throws -> [String] {
+        let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
+        return try dbQueue.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT c.headline FROM feedback f
+                JOIN cluster c ON c.id = f.target_id
+                WHERE f.target = 'cluster' AND f.kind IN ('dismiss', 'thumbs_down')
+                  AND f.created_at >= ?
+                ORDER BY f.created_at DESC LIMIT ?
+                """, arguments: [cutoff, limit])
+        }
+    }
+
     // MARK: - Seen-item dedup
 
     /// Returns only items whose URL hashes haven't been recorded for this preset.
@@ -618,6 +683,26 @@ final class StorageManager {
             author: row["author"],
             publishedAt: row["published_at"],
             firstSeenAt: firstSeenAt
+        )
+    }
+
+    private static func makeFeedback(from row: Row) -> Feedback? {
+        guard let idString: String = row["id"],
+              let id = UUID(uuidString: idString),
+              let targetRaw: String = row["target"],
+              let target = Feedback.Target(rawValue: targetRaw),
+              let targetID: String = row["target_id"],
+              let kindRaw: String = row["kind"],
+              let kind = Feedback.Kind(rawValue: kindRaw),
+              let createdAt: Date = row["created_at"]
+        else { return nil }
+        return Feedback(
+            id: id,
+            target: target,
+            targetID: targetID,
+            kind: kind,
+            note: row["note"],
+            createdAt: createdAt
         )
     }
 

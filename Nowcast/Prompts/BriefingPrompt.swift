@@ -3,7 +3,10 @@ import Foundation
 /// Prompt template ported from the `topic-pulse` skill: TL;DR → Stories →
 /// Signal → Sources. Kept here so it's easy to iterate and test in isolation.
 enum BriefingPrompt {
-    static func render(topic: String, window: TimeWindow, items: [RawItem]) -> String {
+    static func render(topic: String,
+                       window: TimeWindow,
+                       items: [RawItem],
+                       avoidHint: String? = nil) -> String {
         let dateString: String = {
             let f = DateFormatter()
             f.dateStyle = .medium
@@ -16,9 +19,11 @@ enum BriefingPrompt {
             .map { Self.serialize(item: $1, index: $0 + 1) }
             .joined(separator: "\n\n")
 
+        let avoidBlock = avoidHint.map { "\n\($0)\n" } ?? ""
+
         return """
         You are writing a short, opinionated briefing for a busy reader who wants to catch up on a topic without reading every link.
-
+        \(avoidBlock)
         # Topic
         \(topic)
 

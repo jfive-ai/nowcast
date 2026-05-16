@@ -8,6 +8,9 @@ struct ReportView: View {
 
     @State private var markdown: String = ""
     @State private var copyFlash: Bool = false
+    @State private var clusters: [BriefingResult.Cluster] = []
+    @State private var reportFeedbackKinds: Set<Feedback.Kind> = []
+    @State private var clusterFeedbackKinds: [String: Set<Feedback.Kind>] = [:]
 
     var body: some View {
         ScrollView {
@@ -36,15 +39,35 @@ struct ReportView: View {
 
                 renderedMarkdown
                     .textSelection(.enabled)
+
+                if !clusters.isEmpty {
+                    Divider().padding(.top, 8)
+                    Text("Clusters")
+                        .font(.headline)
+                    ForEach(clusters) { cluster in
+                        clusterRow(cluster)
+                    }
+                }
             }
             .padding(24)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .task(id: report.id) {
             markdown = state.loadMarkdown(for: report)
+            clusters = state.clusters(forReport: report.id)
+            reportFeedbackKinds = Set(state.feedback(target: .report, targetID: report.id.uuidString).map(\.kind))
+            var byCluster: [String: Set<Feedback.Kind>] = [:]
+            for c in clusters {
+                byCluster[c.id] = Set(state.feedback(target: .cluster, targetID: c.id).map(\.kind))
+            }
+            clusterFeedbackKinds = byCluster
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
+                feedbackToggle(.thumbsUp)
+                feedbackToggle(.thumbsDown)
+                feedbackToggle(.hallucination)
+
                 Button(action: copyMarkdown) {
                     Label(copyFlash ? "Copied" : "Copy", systemImage: "doc.on.doc")
                 }
@@ -61,6 +84,91 @@ struct ReportView: View {
                 .disabled(markdown.isEmpty)
             }
         }
+    }
+
+    // MARK: - Feedback
+
+    @ViewBuilder
+    private func feedbackToggle(_ kind: Feedback.Kind) -> some View {
+        let active = reportFeedbackKinds.contains(kind)
+        Button {
+            toggleReportFeedback(kind)
+        } label: {
+            Label(kind.displayName, systemImage: kind.symbol)
+                .symbolVariant(active ? .fill : .none)
+                .foregroundStyle(active ? color(for: kind) : .secondary)
+        }
+        .help(kind.displayName)
+    }
+
+    private func color(for kind: Feedback.Kind) -> Color {
+        switch kind {
+        case .thumbsUp:      return .green
+        case .thumbsDown:    return .orange
+        case .hallucination: return .red
+        case .star:          return .yellow
+        case .dismiss:       return .gray
+        }
+    }
+
+    private func toggleReportFeedback(_ kind: Feedback.Kind) {
+        let target = report.id.uuidString
+        if reportFeedbackKinds.contains(kind) {
+            state.removeFeedback(target: .report, targetID: target, kind: kind)
+            reportFeedbackKinds.remove(kind)
+        } else {
+            state.addFeedback(target: .report, targetID: target, kind: kind)
+            reportFeedbackKinds.insert(kind)
+        }
+    }
+
+    private func toggleClusterFeedback(_ clusterID: String, _ kind: Feedback.Kind) {
+        var set = clusterFeedbackKinds[clusterID] ?? []
+        if set.contains(kind) {
+            state.removeFeedback(target: .cluster, targetID: clusterID, kind: kind)
+            set.remove(kind)
+        } else {
+            state.addFeedback(target: .cluster, targetID: clusterID, kind: kind)
+            set.insert(kind)
+        }
+        clusterFeedbackKinds[clusterID] = set
+    }
+
+    @ViewBuilder
+    private func clusterRow(_ cluster: BriefingResult.Cluster) -> some View {
+        let kinds = clusterFeedbackKinds[cluster.id] ?? []
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(cluster.headline)
+                    .font(.subheadline).bold()
+                Spacer()
+                clusterButton(cluster.id, kind: .star, active: kinds.contains(.star))
+                clusterButton(cluster.id, kind: .thumbsUp, active: kinds.contains(.thumbsUp))
+                clusterButton(cluster.id, kind: .thumbsDown, active: kinds.contains(.thumbsDown))
+                clusterButton(cluster.id, kind: .dismiss, active: kinds.contains(.dismiss))
+            }
+            Text(cluster.summary)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.secondary.opacity(0.06))
+        )
+    }
+
+    @ViewBuilder
+    private func clusterButton(_ clusterID: String, kind: Feedback.Kind, active: Bool) -> some View {
+        Button {
+            toggleClusterFeedback(clusterID, kind)
+        } label: {
+            Image(systemName: kind.symbol)
+                .symbolVariant(active ? .fill : .none)
+                .foregroundStyle(active ? color(for: kind) : .secondary)
+        }
+        .buttonStyle(.plain)
+        .help(kind.displayName)
     }
 
     // MARK: - Toolbar actions

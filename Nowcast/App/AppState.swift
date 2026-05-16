@@ -277,6 +277,40 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: - Feedback (P4-4)
+
+    func feedback(target: Feedback.Target, targetID: String) -> [Feedback] {
+        (try? storage.feedback(target: target, targetID: targetID)) ?? []
+    }
+
+    func addFeedback(target: Feedback.Target, targetID: String, kind: Feedback.Kind, note: String? = nil) {
+        let entry = Feedback(
+            id: UUID(),
+            target: target,
+            targetID: targetID,
+            kind: kind,
+            note: note,
+            createdAt: Date()
+        )
+        do {
+            try storage.recordFeedback(entry)
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func removeFeedback(target: Feedback.Target, targetID: String, kind: Feedback.Kind) {
+        do {
+            try storage.deleteFeedback(target: target, targetID: targetID, kind: kind)
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func clusters(forReport reportID: UUID) -> [BriefingResult.Cluster] {
+        (try? storage.clusters(for: reportID)) ?? []
+    }
+
     func loadMarkdown(for report: Report) -> String {
         (try? storage.loadMarkdown(for: report)) ?? "_(could not load report file)_"
     }
