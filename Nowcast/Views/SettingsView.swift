@@ -12,6 +12,9 @@ struct SettingsView: View {
     @State private var draftOllamaURL: String = ""
     @State private var draftRetention: String = ""
     @State private var savedFlash: Bool = false
+    @State private var selfCheckResult: String = ""
+    @State private var selfCheckPassed: Bool? = nil
+    @State private var selfCheckRunning: Bool = false
 
     var body: some View {
         TabView {
@@ -121,6 +124,43 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+#if DEBUG
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack {
+                        Button {
+                            runSelfCheck()
+                        } label: {
+                            if selfCheckRunning {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Text("Run self-check")
+                            }
+                        }
+                        .disabled(selfCheckRunning)
+                        if let passed = selfCheckPassed {
+                            Label(passed ? "PASS" : "FAIL", systemImage: passed ? "checkmark.circle.fill" : "xmark.octagon.fill")
+                                .foregroundStyle(passed ? .green : .red)
+                                .font(.caption)
+                        }
+                    }
+                    Text("Exercises every Phase-4 code path with a mock LLM. No API spend; inserts a small synthetic report.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    if !selfCheckResult.isEmpty {
+                        ScrollView {
+                            Text(selfCheckResult)
+                                .font(.system(.caption, design: .monospaced))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(8)
+                        }
+                        .frame(maxHeight: 180)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.secondary.opacity(0.08))
+                        )
+                    }
+                }
+#endif
             }
 
             Section("Storage") {
@@ -160,6 +200,21 @@ struct SettingsView: View {
         }
         .formStyle(.grouped)
     }
+
+#if DEBUG
+    private func runSelfCheck() {
+        selfCheckRunning = true
+        selfCheckResult = "Running…"
+        selfCheckPassed = nil
+        Task { @MainActor in
+            let result = await SelfCheck.run(storage: state.storage)
+            selfCheckRunning = false
+            selfCheckPassed = result.passed
+            selfCheckResult = result.summary
+            state.refresh()
+        }
+    }
+#endif
 
     private var queryRewritingBinding: Binding<Bool> {
         Binding(
