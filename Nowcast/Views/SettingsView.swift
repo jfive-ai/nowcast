@@ -104,6 +104,17 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Pipeline") {
+                Toggle(isOn: queryRewritingBinding) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Query rewriting")
+                        Text("Fan out 3+ word topics into 2-4 sub-queries. One extra cheap LLM call per run; better recall.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
             Section("Storage") {
                 HStack {
                     Text("Total report size")
@@ -140,6 +151,13 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    private var queryRewritingBinding: Binding<Bool> {
+        Binding(
+            get: { state.queryRewritingEnabled },
+            set: { state.queryRewritingEnabled = $0 }
+        )
     }
 
     private var providerBinding: Binding<LLMProvider> {
