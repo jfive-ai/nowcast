@@ -9,7 +9,19 @@ struct ContentView: View {
                 TopicLibraryView()
                     .padding()
                 Divider()
-                HistoryView(selectedReport: selectionBinding)
+                Picker("", selection: $state.sidebarSelection) {
+                    Text("History").tag(AppState.SidebarSection.history)
+                    Text("Search").tag(AppState.SidebarSection.search)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.top, 6)
+                switch state.sidebarSelection {
+                case .history:
+                    HistoryView(selectedReport: selectionBinding)
+                case .search:
+                    SearchView()
+                }
             }
             .frame(minWidth: 280)
         } detail: {

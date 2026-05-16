@@ -166,6 +166,30 @@ enum Schema {
                           columns: ["source_kind", "started_at"])
         }
 
+        // v8: full-text search over report topic+markdown and per-item
+        // title+snippet (P4-6). FTS5 with porter stemming + an "external
+        // content" virtual table would be nicest but GRDB's FTS helpers
+        // are a thin wrapper — we keep it simple and maintain the index
+        // ourselves on every report insert (in StorageManager).
+        m.registerMigration("v8") { db in
+            try db.execute(sql: """
+                CREATE VIRTUAL TABLE report_fts USING fts5(
+                    report_id UNINDEXED,
+                    topic,
+                    body,
+                    tokenize = 'porter'
+                );
+                """)
+            try db.execute(sql: """
+                CREATE VIRTUAL TABLE item_fts USING fts5(
+                    item_id UNINDEXED,
+                    title,
+                    snippet,
+                    tokenize = 'porter'
+                );
+                """)
+        }
+
         return m
     }
 

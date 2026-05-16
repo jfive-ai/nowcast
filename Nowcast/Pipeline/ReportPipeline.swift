@@ -167,6 +167,11 @@ final class ReportPipeline {
             try? storage.saveBriefing(validated, reportID: stored.id)
         }
 
+        // 7b. Index the report + items into FTS5 for in-app search (P4-6).
+        try? storage.indexReportForSearch(stored.id, topic: topic, body: markdown)
+        let storedItems = (try? storage.itemsForReport(stored.id)) ?? []
+        try? storage.indexItemsForSearch(storedItems)
+
         // 8. Record per-adapter outcomes for the source health panel.
         let freshURLHashSet = Set(fresh.map(\.urlHash))
         for outcome in outcomes {
