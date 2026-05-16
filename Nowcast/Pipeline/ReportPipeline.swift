@@ -9,12 +9,14 @@ final class ReportPipeline {
     private let llm: LLMClient
     private let model: String?
     private let queryRewritingEnabled: Bool
+    private let contradictionDetectionEnabled: Bool
 
     init(adapters: [SourceAdapter],
          storage: StorageManager,
          llm: LLMClient,
          model: String? = nil,
-         queryRewritingEnabled: Bool = false) {
+         queryRewritingEnabled: Bool = false,
+         contradictionDetectionEnabled: Bool = false) {
         var map: [SourceKind: SourceAdapter] = [:]
         for adapter in adapters { map[adapter.kind] = adapter }
         self.adapters = map
@@ -22,6 +24,7 @@ final class ReportPipeline {
         self.llm = llm
         self.model = model
         self.queryRewritingEnabled = queryRewritingEnabled
+        self.contradictionDetectionEnabled = contradictionDetectionEnabled
     }
 
     /// Generate a report. Throws if no items are found at all (caller decides
@@ -146,11 +149,22 @@ final class ReportPipeline {
             return BriefDiff.renderMarkdown(delta)
         }()
 
+        // 3d. Optional cross-source contradiction detection (P4-10).
+        let contradictionSection: String? = await {
+            guard contradictionDetectionEnabled,
+                  let current = validatedResult, !current.clusters.isEmpty
+            else { return nil }
+            let detector = ContradictionDetector(llm: llm, model: model)
+            let pairs = await detector.detect(in: current.clusters)
+            return ContradictionDetector.renderMarkdown(pairs)
+        }()
+
         // 4. Wrap with a header and persist.
         let header = Self.headerMarkdown(topic: topic, window: window, fresh: fresh.count, total: collected.count)
         let visibleBody = extracted.result == nil ? response.text : extracted.markdown
         let diffPrefix = diffSection.map { $0 + "\n\n" } ?? ""
-        let markdown = header + "\n\n" + diffPrefix + visibleBody
+        let contradictionPrefix = contradictionSection.map { $0 + "\n\n" } ?? ""
+        let markdown = header + "\n\n" + contradictionPrefix + diffPrefix + visibleBody
 
         let usdCost = response.usage.flatMap {
             ModelPricing.cost(forModel: response.model, usage: $0)

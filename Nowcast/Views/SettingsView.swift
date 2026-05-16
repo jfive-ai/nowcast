@@ -113,6 +113,14 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                Toggle(isOn: contradictionDetectionBinding) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Contradiction detection")
+                        Text("Second-pass scan for cross-source disagreement (numbers, dates, entities). One extra LLM call per brief.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
             }
 
             Section("Storage") {
@@ -157,6 +165,13 @@ struct SettingsView: View {
         Binding(
             get: { state.queryRewritingEnabled },
             set: { state.queryRewritingEnabled = $0 }
+        )
+    }
+
+    private var contradictionDetectionBinding: Binding<Bool> {
+        Binding(
+            get: { state.contradictionDetectionEnabled },
+            set: { state.contradictionDetectionEnabled = $0 }
         )
     }
 
