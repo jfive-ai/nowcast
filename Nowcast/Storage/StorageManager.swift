@@ -682,6 +682,55 @@ final class StorageManager {
         }
     }
 
+    // MARK: - Conversation (v9, P5-1)
+
+    func insertConversationMessage(_ message: ConversationMessage) throws {
+        let citationsJSON = (try? Self.encodeJSON(message.citations)) ?? "[]"
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT INTO conversation_message
+                  (id, report_id, role, text, citations_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """, arguments: [
+                    message.id.uuidString,
+                    message.reportID.uuidString,
+                    message.role.rawValue,
+                    message.text,
+                    citationsJSON,
+                    message.createdAt,
+                ])
+        }
+    }
+
+    func conversationMessages(forReport reportID: UUID) throws -> [ConversationMessage] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT id, report_id, role, text, citations_json, created_at
+                FROM conversation_message
+                WHERE report_id = ?
+                ORDER BY created_at ASC
+                """, arguments: [reportID.uuidString])
+                .compactMap(Self.makeConversationMessage)
+        }
+    }
+
+    func deleteConversation(forReport reportID: UUID) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "DELETE FROM conversation_message WHERE report_id = ?",
+                arguments: [reportID.uuidString]
+            )
+        }
+    }
+
+    func conversationMessageCount(forReport reportID: UUID) throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql: """
+                SELECT COUNT(*) FROM conversation_message WHERE report_id = ?
+                """, arguments: [reportID.uuidString]) ?? 0
+        }
+    }
+
     // MARK: - Seen-item dedup
 
     /// Returns only items whose URL hashes haven't been recorded for this preset.
@@ -848,6 +897,28 @@ final class StorageManager {
             targetID: targetID,
             kind: kind,
             note: row["note"],
+            createdAt: createdAt
+        )
+    }
+
+    private static func makeConversationMessage(from row: Row) -> ConversationMessage? {
+        guard let idString: String = row["id"],
+              let id = UUID(uuidString: idString),
+              let reportIDString: String = row["report_id"],
+              let reportID = UUID(uuidString: reportIDString),
+              let roleRaw: String = row["role"],
+              let role = ConversationMessage.Role(rawValue: roleRaw),
+              let text: String = row["text"],
+              let createdAt: Date = row["created_at"]
+        else { return nil }
+        let citationsJSON: String = row["citations_json"] ?? "[]"
+        let citations: [String] = (try? Self.decodeJSON(citationsJSON)) ?? []
+        return ConversationMessage(
+            id: id,
+            reportID: reportID,
+            role: role,
+            text: text,
+            citations: citations,
             createdAt: createdAt
         )
     }

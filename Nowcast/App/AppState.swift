@@ -454,6 +454,19 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Build a `BriefChatSession` for the given report. Returns nil when no
+    /// LLM provider is configured (caller can show the Settings nag).
+    @MainActor
+    func makeBriefChatSession(for report: Report) -> BriefChatSession? {
+        guard let llm = makeLLMClient() else { return nil }
+        return BriefChatSession(
+            report: report,
+            storage: storage,
+            llm: llm,
+            model: activeModelOverride
+        )
+    }
+
     // MARK: - Internals
 
     /// Build the active LLM client based on the user's provider selection.
