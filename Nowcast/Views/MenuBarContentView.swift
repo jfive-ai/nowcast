@@ -6,11 +6,16 @@ import AppKit
 /// open the main window.
 struct MenuBarContentView: View {
     @EnvironmentObject private var state: AppState
+    @EnvironmentObject private var audio: AudioBriefPlayer
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
+            if let latest = state.reports.first {
+                playLatestSection(latest)
+                Divider()
+            }
             recentReportsSection
             Divider()
             runNowSection
@@ -18,6 +23,37 @@ struct MenuBarContentView: View {
             footer
         }
         .frame(width: 320)
+    }
+
+    @ViewBuilder
+    private func playLatestSection(_ report: Report) -> some View {
+        let playing = audio.isPlaying(reportID: report.id)
+        let paused = audio.isPaused(reportID: report.id)
+        Button {
+            if playing {
+                audio.pause()
+            } else {
+                let md = state.loadMarkdown(for: report)
+                audio.play(reportID: report.id, markdown: md)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: playing ? "pause.fill" : (paused ? "play.fill" : "play.fill"))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(playing ? "Pause brief" : (paused ? "Resume brief" : "Play today's brief"))
+                        .font(.body)
+                    Text(report.topic)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+            }
+            .contentShape(Rectangle())
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+        .buttonStyle(.plain)
     }
 
     private var header: some View {
