@@ -277,6 +277,12 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: - Source health (P4-5)
+
+    func sourceHealthRows(days: Int = 30) throws -> [SourceHealth] {
+        try storage.sourceHealth(days: days)
+    }
+
     // MARK: - Feedback (P4-4)
 
     func feedback(target: Feedback.Target, targetID: String) -> [Feedback] {

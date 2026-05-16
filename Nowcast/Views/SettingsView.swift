@@ -19,6 +19,8 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             SubscriptionsView()
                 .tabItem { Label("Sources", systemImage: "list.bullet.rectangle") }
+            SourceHealthView()
+                .tabItem { Label("Health", systemImage: "waveform.path.ecg") }
             NitterMirrorsView()
                 .tabItem { Label("Nitter", systemImage: "network") }
             EmailSettingsView()

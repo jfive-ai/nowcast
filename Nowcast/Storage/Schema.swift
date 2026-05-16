@@ -146,6 +146,26 @@ enum Schema {
             try db.create(indexOn: "feedback", columns: ["target", "target_id"])
         }
 
+        // v7: per-adapter outcomes per run (P4-5 source health & trust).
+        // One row per (report, source_kind) — captures latency, fetch
+        // success, items returned, and error text when present.
+        m.registerMigration("v7") { db in
+            try db.create(table: "source_run") { t in
+                t.column("id", .text).primaryKey()
+                t.column("report_id", .text)
+                    .notNull()
+                    .references("report", onDelete: .cascade)
+                t.column("source_kind", .text).notNull()
+                t.column("started_at", .datetime).notNull()
+                t.column("finished_at", .datetime)
+                t.column("items_returned", .integer).notNull().defaults(to: 0)
+                t.column("items_fresh", .integer).notNull().defaults(to: 0)
+                t.column("error_message", .text)
+            }
+            try db.create(indexOn: "source_run",
+                          columns: ["source_kind", "started_at"])
+        }
+
         return m
     }
 
