@@ -3,11 +3,13 @@ import SwiftUI
 @main
 struct NowcastApp: App {
     @StateObject private var state = AppState()
+    @StateObject private var audioPlayer = AudioBriefPlayer()
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(state)
+                .environmentObject(audioPlayer)
                 .frame(minWidth: 900, minHeight: 600)
         }
         .windowStyle(.titleBar)
@@ -24,6 +26,7 @@ struct NowcastApp: App {
         MenuBarExtra {
             MenuBarContentView()
                 .environmentObject(state)
+                .environmentObject(audioPlayer)
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "newspaper")
