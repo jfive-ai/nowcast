@@ -10,6 +10,8 @@ final class AppState: ObservableObject {
     @Published private(set) var presets: [TopicPreset] = []
     @Published private(set) var subscriptions: [SourceSubscription] = []
     @Published private(set) var totalReportBytes: Int64 = 0
+    @Published private(set) var totalItemCount: Int = 0
+    @Published private(set) var totalReportItemCount: Int = 0
     @Published private(set) var unreadCount: Int = 0
     @Published var lastError: String?
     @Published var isGenerating: Bool = false
@@ -243,6 +245,8 @@ final class AppState: ObservableObject {
             reports = try storage.listReports()
             totalReportBytes = try storage.totalReportBytes()
             unreadCount = try storage.unreadCount()
+            totalItemCount = (try? storage.totalItemCount()) ?? 0
+            totalReportItemCount = (try? storage.totalReportItemCount()) ?? 0
         } catch {
             lastError = error.localizedDescription
         }
