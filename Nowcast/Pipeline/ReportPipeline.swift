@@ -68,9 +68,18 @@ final class ReportPipeline {
         let prompt = BriefingPrompt.render(topic: topic, window: window, items: fresh)
         let response = try await llm.summarize(prompt: prompt, model: model)
 
+        // 3b. Try to extract the structured trailing JSON block. If the
+        //     model didn't emit one, or it failed to parse, gracefully fall
+        //     back to the visible markdown so the user still gets a brief.
+        let extracted = BriefingExtractor.extract(from: response.text)
+        let validatedResult: BriefingResult? = extracted.result.map {
+            CitationValidator.filter($0, againstInputs: fresh)
+        }
+
         // 4. Wrap with a header and persist.
         let header = Self.headerMarkdown(topic: topic, window: window, fresh: fresh.count, total: collected.count)
-        let markdown = header + "\n\n" + response.text
+        let visibleBody = extracted.result == nil ? response.text : extracted.markdown
+        let markdown = header + "\n\n" + visibleBody
 
         let usdCost = response.usage.flatMap {
             ModelPricing.cost(forModel: response.model, usage: $0)
@@ -100,6 +109,13 @@ final class ReportPipeline {
         try? storage.attachItemsToReport(stored.id,
                                          itemIDsByHash: itemIDsByHash,
                                          freshHashes: freshHashes)
+
+        // 7. Persist structured clusters/claims if the LLM cooperated. Best
+        //    effort — markdown is already saved so a save failure here is
+        //    not user-visible.
+        if let validated = validatedResult {
+            try? storage.saveBriefing(validated, reportID: stored.id)
+        }
 
         return stored
     }

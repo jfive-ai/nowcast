@@ -103,6 +103,34 @@ enum Schema {
             try db.create(indexOn: "report_item", columns: ["item_id"])
         }
 
+        // v5: persist the machine-readable clusters + claims the LLM emits
+        // alongside its markdown (P4-2). Unblocks diff (P4-3), feedback
+        // targets (P4-4), and contradiction detection (P4-10).
+        m.registerMigration("v5") { db in
+            try db.create(table: "cluster") { t in
+                t.column("id", .text).primaryKey()
+                t.column("report_id", .text)
+                    .notNull()
+                    .references("report", onDelete: .cascade)
+                t.column("headline", .text).notNull()
+                t.column("summary", .text).notNull()
+                t.column("ord", .integer).notNull()
+                t.column("citations_json", .text).notNull().defaults(to: "[]")
+            }
+            try db.create(indexOn: "cluster", columns: ["report_id"])
+
+            try db.create(table: "claim") { t in
+                t.column("id", .text).primaryKey()
+                t.column("cluster_id", .text)
+                    .notNull()
+                    .references("cluster", onDelete: .cascade)
+                t.column("text", .text).notNull()
+                t.column("citations_json", .text).notNull().defaults(to: "[]")
+                t.column("ord", .integer).notNull()
+            }
+            try db.create(indexOn: "claim", columns: ["cluster_id"])
+        }
+
         return m
     }
 

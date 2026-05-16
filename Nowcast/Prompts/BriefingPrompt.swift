@@ -54,6 +54,34 @@ enum BriefingPrompt {
         - Don't repeat the topic name in headers.
         - If an input has a non-English title, summarize in English.
         - Do not include any meta-commentary about the prompt or your process.
+
+        # Machine-readable footer (REQUIRED)
+        After the Sources section, append the exact sentinel line `<!-- briefing-json -->` on its own line, then a fenced ```json``` block matching this shape (no trailing prose):
+
+        ```json
+        {
+          "tldr": ["...", "...", "..."],
+          "clusters": [
+            {
+              "id": "c1",
+              "headline": "...",
+              "summary": "...",
+              "claims": [
+                { "text": "...", "citations": ["https://..."] }
+              ],
+              "citations": ["https://...", "https://..."]
+            }
+          ],
+          "signal": "...",
+          "low_confidence": false
+        }
+        ```
+
+        Rules for the JSON block:
+        - Every URL in `citations` MUST appear in the inputs above. Do not invent URLs.
+        - `clusters` must correspond 1-to-1 with the Stories section.
+        - `low_confidence` is `true` only if the inputs are too thin to support a real signal.
+        - The JSON must be valid (no trailing commas, no comments inside the block).
         """
     }
 

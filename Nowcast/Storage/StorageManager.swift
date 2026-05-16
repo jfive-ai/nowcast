@@ -355,6 +355,55 @@ final class StorageManager {
         }
     }
 
+    // MARK: - Clusters / claims (v5)
+
+    /// Persist the structured briefing result for a given report. Idempotent
+    /// per report — calling twice replaces the prior set.
+    func saveBriefing(_ result: BriefingResult, reportID: UUID) throws {
+        try dbQueue.write { db in
+            // Wipe and reinsert; ON DELETE CASCADE on `claim.cluster_id`
+            // takes care of any stale child rows.
+            try db.execute(
+                sql: "DELETE FROM cluster WHERE report_id = ?",
+                arguments: [reportID.uuidString]
+            )
+            for (idx, cluster) in result.clusters.enumerated() {
+                let clusterUUID = UUID()
+                let citationsJSON = (try? Self.encodeJSON(cluster.citations)) ?? "[]"
+                try db.execute(sql: """
+                    INSERT INTO cluster (id, report_id, headline, summary, ord, citations_json)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """, arguments: [
+                        clusterUUID.uuidString,
+                        reportID.uuidString,
+                        cluster.headline,
+                        cluster.summary,
+                        idx,
+                        citationsJSON,
+                    ])
+                for (cidx, claim) in cluster.claims.enumerated() {
+                    let claimCitationsJSON = (try? Self.encodeJSON(claim.citations)) ?? "[]"
+                    try db.execute(sql: """
+                        INSERT INTO claim (id, cluster_id, text, citations_json, ord)
+                        VALUES (?, ?, ?, ?, ?)
+                        """, arguments: [
+                            UUID().uuidString,
+                            clusterUUID.uuidString,
+                            claim.text,
+                            claimCitationsJSON,
+                            cidx,
+                        ])
+                }
+            }
+        }
+    }
+
+    func totalClusterCount() throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM cluster") ?? 0
+        }
+    }
+
     // MARK: - Seen-item dedup
 
     /// Returns only items whose URL hashes haven't been recorded for this preset.
