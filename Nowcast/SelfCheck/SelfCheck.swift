@@ -149,6 +149,19 @@ enum SelfCheck {
         // structured-output prompt routing.
         lines.append("• P4-9/P4-10: enable via Settings → Pipeline toggles to exercise live")
 
+        // P5-1: chat session persists user + assistant turns.
+        let chat = BriefChatSession(
+            report: report,
+            storage: storage,
+            llm: MockLLMClient()
+        )
+        await chat.ask("What's the most important point?")
+        let conv = (try? storage.conversationMessages(forReport: report.id)) ?? []
+        check("P5-1: chat persisted user + assistant turns (got \(conv.count))", conv.count == 2)
+        if let last = conv.last {
+            check("P5-1: last conversation turn is assistant", last.role == .assistant)
+        }
+
         lines.append("")
         lines.append("Final: \(passed ? "PASS" : "FAIL")  ·  report id: \(report.id.uuidString.prefix(8))")
         return Result(passed: passed, lines: lines)

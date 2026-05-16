@@ -12,46 +12,54 @@ struct ReportView: View {
     @State private var clusters: [BriefingResult.Cluster] = []
     @State private var reportFeedbackKinds: Set<Feedback.Kind> = []
     @State private var clusterFeedbackKinds: [String: Set<Feedback.Kind>] = [:]
+    @State private var chatOpen: Bool = false
+    @StateObject private var chatHolder = ChatSessionHolder()
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                Text(report.topic)
-                    .font(.largeTitle).bold()
+        HSplitView {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text(report.topic)
+                        .font(.largeTitle).bold()
 
-                HStack(spacing: 6) {
-                    Text(report.generatedAt, style: .date)
-                    Text(report.generatedAt, style: .time)
-                    Text("·")
-                    Text(report.window.displayName)
-                    Text("·")
-                    Text("\(report.sourceCount) items")
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        Text(report.generatedAt, style: .date)
+                        Text(report.generatedAt, style: .time)
+                        Text("·")
+                        Text(report.window.displayName)
+                        Text("·")
+                        Text("\(report.sourceCount) items")
+                    }
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 
-                if let usage = usageSummary {
-                    Text(usage)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                    if let usage = usageSummary {
+                        Text(usage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
 
-                Divider()
+                    Divider()
 
-                renderedMarkdown
-                    .textSelection(.enabled)
+                    renderedMarkdown
+                        .textSelection(.enabled)
 
-                if !clusters.isEmpty {
-                    Divider().padding(.top, 8)
-                    Text("Clusters")
-                        .font(.headline)
-                    ForEach(clusters) { cluster in
-                        clusterRow(cluster)
+                    if !clusters.isEmpty {
+                        Divider().padding(.top, 8)
+                        Text("Clusters")
+                            .font(.headline)
+                        ForEach(clusters) { cluster in
+                            clusterRow(cluster)
+                        }
                     }
                 }
+                .padding(24)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(24)
-            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if chatOpen, let session = chatHolder.session {
+                ChatDrawerView(session: session)
+            }
         }
         .task(id: report.id) {
             markdown = state.loadMarkdown(for: report)
@@ -62,6 +70,7 @@ struct ReportView: View {
                 byCluster[c.id] = Set(state.feedback(target: .cluster, targetID: c.id).map(\.kind))
             }
             clusterFeedbackKinds = byCluster
+            chatHolder.bind(report: report, state: state)
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -70,6 +79,14 @@ struct ReportView: View {
                 feedbackToggle(.thumbsUp)
                 feedbackToggle(.thumbsDown)
                 feedbackToggle(.hallucination)
+
+                Button {
+                    chatOpen.toggle()
+                } label: {
+                    Label("Chat", systemImage: "bubble.left.and.bubble.right")
+                        .foregroundStyle(chatOpen ? Color.accentColor : .secondary)
+                }
+                .help("Ask follow-up questions about this brief")
 
                 Button(action: copyMarkdown) {
                     Label(copyFlash ? "Copied" : "Copy", systemImage: "doc.on.doc")
@@ -86,6 +103,18 @@ struct ReportView: View {
                 }
                 .disabled(markdown.isEmpty)
             }
+        }
+    }
+
+    /// Wraps a single optional `BriefChatSession` so the report view's `task`
+    /// can rebuild it when the user navigates between reports without losing
+    /// the published bindings the drawer subscribes to.
+    @MainActor
+    final class ChatSessionHolder: ObservableObject {
+        @Published var session: BriefChatSession?
+        func bind(report: Report, state: AppState) {
+            if let existing = session, existing.report.id == report.id { return }
+            session = state.makeBriefChatSession(for: report)
         }
     }
 
