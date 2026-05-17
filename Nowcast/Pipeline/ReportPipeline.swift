@@ -10,13 +10,15 @@ final class ReportPipeline {
     private let model: String?
     private let queryRewritingEnabled: Bool
     private let contradictionDetectionEnabled: Bool
+    private let entityExtractionEnabled: Bool
 
     init(adapters: [SourceAdapter],
          storage: StorageManager,
          llm: LLMClient,
          model: String? = nil,
          queryRewritingEnabled: Bool = false,
-         contradictionDetectionEnabled: Bool = false) {
+         contradictionDetectionEnabled: Bool = false,
+         entityExtractionEnabled: Bool = false) {
         var map: [SourceKind: SourceAdapter] = [:]
         for adapter in adapters { map[adapter.kind] = adapter }
         self.adapters = map
@@ -25,6 +27,7 @@ final class ReportPipeline {
         self.model = model
         self.queryRewritingEnabled = queryRewritingEnabled
         self.contradictionDetectionEnabled = contradictionDetectionEnabled
+        self.entityExtractionEnabled = entityExtractionEnabled
     }
 
     /// Generate a report. Throws if no items are found at all (caller decides
@@ -200,6 +203,14 @@ final class ReportPipeline {
         //    not user-visible.
         if let validated = validatedResult {
             try? storage.saveBriefing(validated, reportID: stored.id)
+
+            // 7a. Cross-brief entity extraction (P5-2). Always best-effort:
+            //     ignore failures, ignore empty results, never block the
+            //     report. Toggle in Settings keeps this opt-in for cost.
+            if entityExtractionEnabled {
+                let extractor = EntityExtractor(llm: llm, model: model)
+                await extractor.enrich(briefing: validated, reportID: stored.id, storage: storage)
+            }
         }
 
         // 7b. Index the report + items into FTS5 for in-app search (P4-6).
