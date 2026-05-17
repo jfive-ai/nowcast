@@ -215,6 +215,46 @@ enum SelfCheck {
         let sawDone = stages.contains { if case .done = $0 { return true } else { return false } }
         check("P5-5: terminal .done event fired", sawDone)
 
+        // P5-6: weekly synthesizer produces a digest row when ≥1 daily exists.
+        let weeklyPreset = TopicPreset(
+            name: "Self-check weekly",
+            query: topic,
+            sources: [.hackerNews],
+            weeklyDigestEnabled: true
+        )
+        do {
+            try storage.upsertPreset(weeklyPreset)
+            // Re-link the synthetic report to this preset so dailyReports(forPreset:) finds it.
+            // (The pipeline above used presetID: nil; for the self-check we just
+            // verify the synthesizer renders + persists, not the wiring.)
+        } catch {
+            // ignore; the assertion below will catch any real failure
+        }
+        let synthesizer = WeeklySynthesizer(storage: storage, llm: MockLLMClient())
+        // Inject a quick-and-dirty daily report under this preset so the
+        // synthesizer has something to chew on.
+        let fakeDaily = Report(
+            id: UUID(),
+            presetID: weeklyPreset.id,
+            topic: topic,
+            window: .today,
+            generatedAt: Date(),
+            markdownPath: "",
+            byteSize: 0,
+            sourceCount: 1,
+            kind: .daily
+        )
+        _ = try? storage.insertReport(fakeDaily, markdown: "## TL;DR\n- One self-check daily.\n\n## Stories\n### Foo\nBar.")
+        do {
+            let digest = try await synthesizer.synthesize(for: weeklyPreset)
+            check("P5-6: weekly digest produced", digest != nil)
+            if let digest {
+                check("P5-6: digest kind is weeklyDigest", digest.kind == .weeklyDigest)
+            }
+        } catch {
+            check("P5-6: synthesize threw \(error.localizedDescription)", false)
+        }
+
         lines.append("")
         lines.append("Final: \(passed ? "PASS" : "FAIL")  ·  report id: \(report.id.uuidString.prefix(8))")
         return Result(passed: passed, lines: lines)

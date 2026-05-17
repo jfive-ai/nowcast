@@ -187,6 +187,11 @@ final class AppState: ObservableObject {
         SpotlightIndexer.shared.reindex(reports: reports) { [weak self] report in
             (try? self?.storage.loadMarkdown(for: report)) ?? ""
         }
+
+        // P5-6: at launch, fire any due weekly digests for opt-in presets.
+        Task { [weak self] in
+            await self?.runDueWeeklyDigests()
+        }
     }
 
     // MARK: - Settings
@@ -533,6 +538,43 @@ final class AppState: ObservableObject {
             llm: llm,
             model: activeModelOverride
         )
+    }
+
+    /// P5-6: scan opt-in presets, fire a weekly synth for each that's due.
+    /// Called once at launch and after each preset run. No-op for presets
+    /// without the toggle or that already ran in the past 7 days.
+    func runDueWeeklyDigests() async {
+        guard let llm = makeLLMClient() else { return }
+        let due = presets.filter { WeeklySynthesizer.isDue($0) }
+        guard !due.isEmpty else { return }
+        let synthesizer = WeeklySynthesizer(storage: storage, llm: llm, model: activeModelOverride)
+        for preset in due {
+            do {
+                _ = try await synthesizer.synthesize(for: preset)
+            } catch {
+                lastError = "Weekly digest for \(preset.name) failed: \(error.localizedDescription)"
+            }
+        }
+        refresh()
+    }
+
+    /// Manual trigger used by the "Run now" button in the preset editor.
+    func runWeeklyDigestNow(for preset: TopicPreset) async {
+        guard let llm = makeLLMClient() else {
+            lastError = missingProviderMessage
+            return
+        }
+        let synthesizer = WeeklySynthesizer(storage: storage, llm: llm, model: activeModelOverride)
+        do {
+            if let stored = try await synthesizer.synthesize(for: preset) {
+                refresh()
+                selectedReportID = stored.id
+            } else {
+                lastError = "No daily briefs in the past 7 days for \(preset.name)."
+            }
+        } catch {
+            lastError = "Weekly digest failed: \(error.localizedDescription)"
+        }
     }
 
     // MARK: - Internals

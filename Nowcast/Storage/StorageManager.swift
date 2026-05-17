@@ -33,8 +33,8 @@ final class StorageManager {
                 try db.execute(sql: """
                     INSERT INTO report
                       (id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
-                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, arguments: [
                         report.id.uuidString,
                         report.presetID?.uuidString,
@@ -50,6 +50,7 @@ final class StorageManager {
                         report.usdCost,
                         report.modelUsed,
                         report.providerUsed,
+                        report.kind.rawValue,
                     ])
             }
         } catch {
@@ -73,7 +74,8 @@ final class StorageManager {
             completionTokens: report.completionTokens,
             usdCost: report.usdCost,
             modelUsed: report.modelUsed,
-            providerUsed: report.providerUsed
+            providerUsed: report.providerUsed,
+            kind: report.kind
         )
         return stored
     }
@@ -82,10 +84,34 @@ final class StorageManager {
         try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
-                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind
                 FROM report
                 ORDER BY generated_at DESC
                 """).compactMap(Self.makeReport)
+        }
+    }
+
+    /// Daily reports for a preset within the last `days` days, oldest-first.
+    /// Used by the weekly synthesizer to build its input set.
+    func dailyReports(forPreset presetID: UUID, withinDays days: Int = 7) throws -> [Report] {
+        let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
+        return try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind
+                FROM report
+                WHERE preset_id = ? AND kind = 'daily' AND generated_at >= ?
+                ORDER BY generated_at ASC
+                """, arguments: [presetID.uuidString, cutoff]).compactMap(Self.makeReport)
+        }
+    }
+
+    func updatePresetLastWeekly(id: UUID, at date: Date) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE topic_preset SET last_weekly_at = ? WHERE id = ?",
+                arguments: [date, id.uuidString]
+            )
         }
     }
 
@@ -125,7 +151,7 @@ final class StorageManager {
         let oldest = try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
-                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind
                 FROM report
                 ORDER BY generated_at ASC
                 LIMIT ?
@@ -141,7 +167,7 @@ final class StorageManager {
         let stale = try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
-                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind
                 FROM report
                 WHERE generated_at < ?
                 """, arguments: [cutoff]).compactMap(Self.makeReport)
@@ -176,8 +202,9 @@ final class StorageManager {
         try dbQueue.write { db in
             try db.execute(sql: """
                 INSERT INTO topic_preset
-                  (id, name, query, window, sources_json, cadence_json, delivery_json, created_at, last_run_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  (id, name, query, window, sources_json, cadence_json, delivery_json, created_at, last_run_at,
+                   weekly_digest_enabled, last_weekly_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   name = excluded.name,
                   query = excluded.query,
@@ -185,7 +212,9 @@ final class StorageManager {
                   sources_json = excluded.sources_json,
                   cadence_json = excluded.cadence_json,
                   delivery_json = excluded.delivery_json,
-                  last_run_at = excluded.last_run_at
+                  last_run_at = excluded.last_run_at,
+                  weekly_digest_enabled = excluded.weekly_digest_enabled,
+                  last_weekly_at = excluded.last_weekly_at
                 """, arguments: [
                     preset.id.uuidString,
                     preset.name,
@@ -196,6 +225,8 @@ final class StorageManager {
                     deliveryJSON,
                     preset.createdAt,
                     preset.lastRunAt,
+                    preset.weeklyDigestEnabled ? 1 : 0,
+                    preset.lastWeeklyAt,
                 ])
         }
     }
@@ -212,7 +243,8 @@ final class StorageManager {
     func listPresets() throws -> [TopicPreset] {
         try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
-                SELECT id, name, query, window, sources_json, cadence_json, delivery_json, created_at, last_run_at
+                SELECT id, name, query, window, sources_json, cadence_json, delivery_json, created_at, last_run_at,
+                       weekly_digest_enabled, last_weekly_at
                 FROM topic_preset
                 ORDER BY created_at ASC
                 """).compactMap(Self.makePreset)
@@ -459,7 +491,7 @@ final class StorageManager {
             if let presetID {
                 row = try Row.fetchOne(db, sql: """
                     SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
-                           prompt_tokens, completion_tokens, usd_cost, model_used, provider_used
+                           prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind
                     FROM report
                     WHERE preset_id = ? AND generated_at < ?
                     ORDER BY generated_at DESC LIMIT 1
@@ -467,7 +499,7 @@ final class StorageManager {
             } else {
                 row = try Row.fetchOne(db, sql: """
                     SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
-                           prompt_tokens, completion_tokens, usd_cost, model_used, provider_used
+                           prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind
                     FROM report
                     WHERE preset_id IS NULL AND topic = ? AND generated_at < ?
                     ORDER BY generated_at DESC LIMIT 1
@@ -809,7 +841,7 @@ final class StorageManager {
             try Row.fetchAll(db, sql: """
                 SELECT r.id, r.preset_id, r.topic, r.window, r.generated_at, r.markdown_path,
                        r.byte_size, r.source_count, r.read_at,
-                       r.prompt_tokens, r.completion_tokens, r.usd_cost, r.model_used, r.provider_used,
+                       r.prompt_tokens, r.completion_tokens, r.usd_cost, r.model_used, r.provider_used, r.kind,
                        em.cluster_id AS cluster_id,
                        c.headline AS cluster_headline
                 FROM entity_mention em
@@ -915,6 +947,9 @@ final class StorageManager {
         let modelUsed: String? = row["model_used"]
         let providerUsed: String? = row["provider_used"]
 
+        let kindRaw: String = row["kind"] ?? "daily"
+        let kind = Report.Kind(rawValue: kindRaw) ?? .daily
+
         return Report(
             id: id,
             presetID: presetID,
@@ -929,7 +964,8 @@ final class StorageManager {
             completionTokens: completionTokens,
             usdCost: usdCost,
             modelUsed: modelUsed,
-            providerUsed: providerUsed
+            providerUsed: providerUsed,
+            kind: kind
         )
     }
 
@@ -950,6 +986,8 @@ final class StorageManager {
         let cadence: Cadence = (try? decodeJSON(cadenceJSON)) ?? .manual
         let delivery: [DeliveryChannel] = (try? decodeJSON(deliveryJSON)) ?? [.inApp]
         let lastRun: Date? = row["last_run_at"]
+        let weeklyEnabledInt: Int = row["weekly_digest_enabled"] ?? 0
+        let lastWeekly: Date? = row["last_weekly_at"]
 
         return TopicPreset(
             id: id,
@@ -960,7 +998,9 @@ final class StorageManager {
             cadence: cadence,
             deliveryChannels: delivery,
             createdAt: createdAt,
-            lastRunAt: lastRun
+            lastRunAt: lastRun,
+            weeklyDigestEnabled: weeklyEnabledInt != 0,
+            lastWeeklyAt: lastWeekly
         )
     }
 

@@ -10,6 +10,12 @@ struct TopicPreset: Identifiable, Codable, Hashable {
     var deliveryChannels: [DeliveryChannel]
     var createdAt: Date
     var lastRunAt: Date?
+    /// P5-6: when true, a weekly synthesis runs once per week over the
+    /// preset's daily reports.
+    var weeklyDigestEnabled: Bool
+    /// P5-6: when the synthesizer last ran for this preset. Drives
+    /// scheduler eligibility (now ≥ last_weekly_at + 7 days).
+    var lastWeeklyAt: Date?
 
     init(
         id: UUID = UUID(),
@@ -20,7 +26,9 @@ struct TopicPreset: Identifiable, Codable, Hashable {
         cadence: Cadence = .manual,
         deliveryChannels: [DeliveryChannel] = [.inApp],
         createdAt: Date = Date(),
-        lastRunAt: Date? = nil
+        lastRunAt: Date? = nil,
+        weeklyDigestEnabled: Bool = false,
+        lastWeeklyAt: Date? = nil
     ) {
         self.id = id
         self.name = name
@@ -31,5 +39,7 @@ struct TopicPreset: Identifiable, Codable, Hashable {
         self.deliveryChannels = deliveryChannels
         self.createdAt = createdAt
         self.lastRunAt = lastRunAt
+        self.weeklyDigestEnabled = weeklyDigestEnabled
+        self.lastWeeklyAt = lastWeeklyAt
     }
 }
