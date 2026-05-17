@@ -215,6 +215,20 @@ enum SelfCheck {
         let sawDone = stages.contains { if case .done = $0 { return true } else { return false } }
         check("P5-5: terminal .done event fired", sawDone)
 
+        // P6-4: follow-up suggester returns ≥1 candidate with both fields filled.
+        let followUpSuggester = FollowUpSuggester(llm: MockLLMClient())
+        let followUps = await followUpSuggester.suggest(
+            for: report,
+            tldr: ["a", "b"],
+            clusterHeadlines: clusters.map(\.headline),
+            existingPresetNames: []
+        )
+        check("P6-4: ≥1 follow-up suggestion (got \(followUps.count))", followUps.count >= 1)
+        if let first = followUps.first {
+            check("P6-4: suggestion has non-empty query", !first.query.isEmpty)
+            check("P6-4: suggestion has ≥1 source", !first.sources.isEmpty)
+        }
+
         // P6-3: BriefDiff.diff against an identical-cluster set returns all
         // continuing (no new, no dropped). Sanity check that the existing
         // diff algorithm we're surfacing in the compare view still behaves.
