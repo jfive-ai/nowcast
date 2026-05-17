@@ -55,10 +55,16 @@ final class ReportPipeline {
             let finishedAt: Date
             let errorMessage: String?
         }
+        // FIX (review #5): cap fan-out for paid/quota'd adapters. Cheap
+        // adapters (HN/Reddit/RSS/News/Nitter) accept N sub-queries, but
+        // YouTube + Brave + Web search only see the original topic, so we
+        // don't burn 10k YouTube quota on a single hourly preset run.
+        let cheapForFanout: Set<SourceKind> = [.hackerNews, .reddit, .rss, .news, .xNitter]
         let outcomes: [FetchOutcome] = await withTaskGroup(of: FetchOutcome.self) { group in
             for kind in sources {
                 guard let adapter = adapters[kind] else { continue }
-                for subQuery in subQueries {
+                let effectiveQueries = cheapForFanout.contains(kind) ? subQueries : [topic]
+                for subQuery in effectiveQueries {
                     group.addTask {
                         let started = Date()
                         do {
@@ -161,7 +167,14 @@ final class ReportPipeline {
 
         // 4. Wrap with a header and persist.
         let header = Self.headerMarkdown(topic: topic, window: window, fresh: fresh.count, total: collected.count)
-        let visibleBody = extracted.result == nil ? response.text : extracted.markdown
+        // FIX (review #2): if the LLM emitted ONLY the JSON block with no
+        // surrounding markdown (extractor strips both, leaving a
+        // whitespace-only prefix), fall back to the raw response so the
+        // user never gets an empty body / empty FTS row.
+        let trimmedMarkdown = extracted.markdown.trimmingCharacters(in: .whitespacesAndNewlines)
+        let visibleBody = (extracted.result == nil || trimmedMarkdown.isEmpty)
+            ? response.text
+            : extracted.markdown
         let diffPrefix = diffSection.map { $0 + "\n\n" } ?? ""
         let contradictionPrefix = contradictionSection.map { $0 + "\n\n" } ?? ""
         let markdown = header + "\n\n" + contradictionPrefix + diffPrefix + visibleBody
@@ -187,8 +200,12 @@ final class ReportPipeline {
         )
         let stored = try storage.insertReport(draft, markdown: markdown)
 
-        // 5. Only now record the items as seen — guarantees retry-on-failure.
-        try storage.recordSeen(fresh, presetID: presetID)
+        // 5. Record items as seen. FIX (review #1): use `try?` — a failed
+        // seen-index write must NOT prevent items/clusters/FTS/source_run
+        // from being persisted, or the report becomes orphaned. The cost
+        // of a missed seen-index entry is one repeated story on the next
+        // run, which is far cheaper than an orphaned report.
+        try? storage.recordSeen(fresh, presetID: presetID)
 
         // 6. Link items to this report so future runs / views can find them.
         try? storage.attachItemsToReport(stored.id,

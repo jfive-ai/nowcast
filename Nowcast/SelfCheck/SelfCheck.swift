@@ -86,11 +86,42 @@ enum SelfCheck {
         let allCitations = clusters.flatMap(\.citations)
         check("P4-2: all citations validated against inputs (got \(allCitations.count))", !allCitations.isEmpty)
 
-        // P4-3: second run on the same topic should produce a diff section
-        let firstID = report.id
-        let report2: Report
+        // P4-3: second run on the same topic should produce a diff section.
+        // FIX (review #10): the previous version reused the same two URLs,
+        // which the seen-index correctly suppressed — meaning the diff
+        // path was never exercised. We now feed the second run a *fresh*
+        // set of URLs against the same topic so the pipeline reaches the
+        // diff-rendering step. P4-3's BriefDiff is what we're actually
+        // probing here.
+        let secondAdapter = StaticItemsAdapter(kind: .hackerNews, items: [
+            RawItem(
+                title: "Item three (diff probe)",
+                url: URL(string: "https://mock.example/three")!,
+                publishedAt: Date(),
+                snippet: "A different snippet so the seen-index doesn't suppress this run.",
+                transcript: nil,
+                sourceKind: .hackerNews,
+                author: "selfcheck"
+            ),
+            RawItem(
+                title: "Item four (diff probe)",
+                url: URL(string: "https://mock.example/four")!,
+                publishedAt: Date(),
+                snippet: "Another distinct snippet.",
+                transcript: nil,
+                sourceKind: .hackerNews,
+                author: "selfcheck"
+            ),
+        ])
+        let pipeline2 = ReportPipeline(
+            adapters: [secondAdapter],
+            storage: storage,
+            llm: MockLLMClient(),
+            queryRewritingEnabled: false,
+            contradictionDetectionEnabled: false
+        )
         do {
-            report2 = try await pipeline.generate(
+            let report2 = try await pipeline2.generate(
                 topic: topic,
                 window: .today,
                 sources: [.hackerNews],
@@ -98,15 +129,8 @@ enum SelfCheck {
                 subscriptions: []
             )
             let md = (try? storage.loadMarkdown(for: report2)) ?? ""
-            // _ = firstID
-            check("P4-3: second-run markdown contains diff header", md.contains("What's new since last brief") || md.contains("Continuing"))
-            _ = firstID
-        } catch PipelineError.noFreshItems {
-            // The seen-index correctly suppressed the duplicate URLs.
-            // That's the expected dedup behavior, but it means no diff to
-            // render — count this as a partial pass (dedup is the correct
-            // outcome, P4-3 path is exercised by the first run already).
-            lines.append("• P4-3: second run dedup'd to zero items (correct; diff path not exercised this run)")
+            check("P4-3: second-run markdown contains diff section header",
+                  md.contains("What's new since last brief"))
         } catch {
             check("P4-3: second-run threw \(error.localizedDescription)", false)
         }

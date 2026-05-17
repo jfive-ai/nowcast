@@ -287,12 +287,20 @@ final class AppState: ObservableObject {
     }
 
     func applyRetention() {
-        guard retentionDays > 0 else { return }
+        // FIX (review #6): always prune the seen-index (90d cutoff,
+        // independent of report retention). Previously this was gated by
+        // `retentionDays > 0`, so a user who chose "keep reports forever"
+        // got unbounded seen_item growth — and `filterUnseen` slows down
+        // proportionally.
+        try? storage.pruneSeenItems()
+        guard retentionDays > 0 else {
+            refresh()
+            return
+        }
         let cutoff = Date().addingTimeInterval(-Double(retentionDays) * 86_400)
         do {
             let removed = try storage.deleteReports(olderThan: cutoff)
             SpotlightIndexer.shared.remove(reportIDs: removed)
-            try storage.pruneSeenItems()
             refresh()
         } catch {
             lastError = error.localizedDescription

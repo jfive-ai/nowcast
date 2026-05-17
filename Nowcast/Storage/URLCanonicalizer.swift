@@ -54,11 +54,16 @@ enum URLCanonicalizer {
         }
 
         // YouTube short → long form.
+        // FIX (review #12): also strip share-only query params on the
+        // short-form URL so `youtu.be/abc?si=foo` collapses to the same
+        // canonical as `youtube.com/watch?v=abc`. Without this, share-link
+        // duplicates leak past dedup.
         if comps.host == "youtu.be", comps.path.count > 1 {
             let videoID = String(comps.path.dropFirst())
             comps.host = "youtube.com"
             comps.path = "/watch"
-            var qi = comps.queryItems ?? []
+            let shareOnly: Set<String> = ["si", "feature", "pp", "t", "ab_channel"]
+            var qi = (comps.queryItems ?? []).filter { !shareOnly.contains($0.name.lowercased()) }
             qi.insert(URLQueryItem(name: "v", value: videoID), at: 0)
             comps.queryItems = qi
         }
