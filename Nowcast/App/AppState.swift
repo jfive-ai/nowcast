@@ -658,6 +658,21 @@ final class AppState: ObservableObject {
         (try? storage.itemsForReport(reportID)) ?? []
     }
 
+    // MARK: - Follow-up suggestions (P6-4)
+
+    func suggestFollowUps(for report: Report,
+                          tldr: [String],
+                          clusterHeadlines: [String]) async -> [FollowUpSuggester.Suggestion] {
+        guard let llm = makeLLMClient() else { return [] }
+        let suggester = FollowUpSuggester(llm: llm, model: activeModelOverride)
+        return await suggester.suggest(
+            for: report,
+            tldr: tldr,
+            clusterHeadlines: clusterHeadlines,
+            existingPresetNames: presets.map(\.name)
+        )
+    }
+
     // MARK: - Compare (P6-3)
 
     /// Reports the user can plausibly compare with `report` — same preset

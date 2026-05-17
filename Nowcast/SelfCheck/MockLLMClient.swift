@@ -97,6 +97,14 @@ struct MockLLMClient: LLMClient {
     ]}
     """
 
+    static let cannedFollowUpsEnvelope: String = """
+    {"suggestions": [
+      {"name": "ETH staking deep-dive", "query": "ethereum staking validator economics", "sources": ["hackerNews", "reddit"]},
+      {"name": "Restaking weekly", "query": "eigenlayer symbiotic restaking", "sources": ["news"]},
+      {"name": "L2 readiness", "query": "L2 rollup pectra readiness", "sources": ["hackerNews", "rss"]}
+    ]}
+    """
+
     func summarize(prompt: String, model: String?) async throws -> LLMResponse {
         // Heuristic routing: the rewriter, contradiction detector, entity
         // extractor, and briefing prompt are distinct enough that we can
@@ -110,6 +118,8 @@ struct MockLLMClient: LLMClient {
             text = Self.cannedEntitiesEnvelope
         } else if prompt.contains("critical-reading coach") {
             text = Self.cannedCounterpointsEnvelope
+        } else if prompt.contains("follow-up topic presets") {
+            text = Self.cannedFollowUpsEnvelope
         } else {
             text = Self.cannedBrief
         }

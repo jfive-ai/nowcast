@@ -17,6 +17,8 @@ struct ReportView: View {
     @State private var urlIndex: [String: PersistedItem] = [:]
     @State private var provenanceOpen: Bool = false
     @State private var provenanceRows: [ProvenanceBuilder.ClusterRows] = []
+    @State private var followUps: [FollowUpSuggester.Suggestion] = []
+    @State private var presetDraft: TopicPreset?
 
     var body: some View {
         HSplitView {
@@ -40,6 +42,16 @@ struct ReportView: View {
                         Text(usage)
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                    }
+
+                    if !followUps.isEmpty {
+                        FollowUpStrip(suggestions: followUps) { sug in
+                            presetDraft = TopicPreset(
+                                name: sug.name,
+                                query: sug.query,
+                                sources: sug.sources
+                            )
+                        }
                     }
 
                     Divider()
@@ -82,6 +94,27 @@ struct ReportView: View {
             urlIndex = MarkdownLinkText.buildIndex(items: items)
             // P6-2: build the provenance rows for the drawer.
             provenanceRows = ProvenanceBuilder.build(clusters: clusters, items: items)
+            // P6-4: kick off follow-up suggestions in the background; the
+            // strip is hidden until results land.
+            followUps = []
+            let tldr = Self.extractTLDR(from: markdown)
+            let headlines = clusters.map(\.headline)
+            let reportRef = report
+            Task { @MainActor in
+                let sugs = await state.suggestFollowUps(
+                    for: reportRef,
+                    tldr: tldr,
+                    clusterHeadlines: headlines
+                )
+                if reportRef.id == report.id {
+                    followUps = sugs
+                }
+            }
+        }
+        .sheet(item: $presetDraft) { draft in
+            TopicPresetEditor(preset: draft) { saved in
+                state.savePreset(saved)
+            }
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -144,6 +177,25 @@ struct ReportView: View {
                 .disabled(markdown.isEmpty)
             }
         }
+    }
+
+    /// Pulls TL;DR bullet lines out of brief markdown — same shape that
+    /// `WebhookDeliverer` extracts. Used by P6-4 to feed the follow-up
+    /// suggester a compact summary of the current brief.
+    static func extractTLDR(from markdown: String) -> [String] {
+        var out: [String] = []
+        var inTLDR = false
+        for line in markdown.components(separatedBy: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.lowercased().hasPrefix("## tl;dr") || trimmed.lowercased().hasPrefix("## tldr") {
+                inTLDR = true; continue
+            }
+            if inTLDR {
+                if trimmed.hasPrefix("## ") { break }
+                if trimmed.hasPrefix("- ") { out.append(String(trimmed.dropFirst(2))) }
+            }
+        }
+        return out
     }
 
     /// Wraps a single optional `BriefChatSession` so the report view's `task`
