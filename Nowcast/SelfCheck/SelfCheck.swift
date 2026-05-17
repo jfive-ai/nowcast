@@ -189,6 +189,20 @@ enum SelfCheck {
         let section = CounterpointAgent.renderMarkdownSection(for: annotated)
         check("P5-3: markdown section rendered", section?.contains("Counterpoints") == true)
 
+        // P5-4: webhook formatters produce non-empty payloads for each format.
+        let webhookMD = (try? storage.loadMarkdown(for: report)) ?? ""
+        for fmt in WebhookFormat.allCases {
+            let data = WebhookDeliverer.renderPayload(
+                report: report,
+                markdown: webhookMD,
+                clusters: clusters,
+                format: fmt
+            )
+            check("P5-4: \(fmt.displayName) payload non-empty (\(data.count) bytes)", data.count > 8)
+        }
+        let detected = WebhookFormat.detect(from: "https://hooks.slack.com/services/AAA/BBB/CCC")
+        check("P5-4: format detection identifies Slack", detected == .slack)
+
         lines.append("")
         lines.append("Final: \(passed ? "PASS" : "FAIL")  ·  report id: \(report.id.uuidString.prefix(8))")
         return Result(passed: passed, lines: lines)
