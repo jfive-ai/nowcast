@@ -37,21 +37,33 @@ struct AnalyticsRepository {
     func costByDay(lastDays days: Int = 30) throws -> [CostPoint] {
         try storage.dbQueue.read { db in
             let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
+            // FIX (codex review PR #33): bucket by *local* day, not UTC.
+            // SQLite's `date(generated_at)` returns UTC; for non-UTC time
+            // zones (most users) reports at e.g. 7pm local would land in
+            // the wrong calendar bucket. We pass the current TZ's offset
+            // via the `localmod` modifier so daily spend lines up with
+            // the user's calendar.
+            let tzMinutes = TimeZone.current.secondsFromGMT() / 60
+            let sign = tzMinutes >= 0 ? "+" : "-"
+            let absMins = abs(tzMinutes)
+            let modifier = "\(sign)\(absMins / 60) hours \(absMins % 60) minutes"
             let rows = try Row.fetchAll(db, sql: """
-                SELECT date(generated_at) AS day, COALESCE(SUM(usd_cost), 0) AS usd
+                SELECT date(generated_at, ?) AS day, COALESCE(SUM(usd_cost), 0) AS usd
                 FROM report
                 WHERE generated_at >= ?
                 GROUP BY day
                 ORDER BY day ASC
-                """, arguments: [cutoff])
-            let fmt = ISO8601DateFormatter()
-            fmt.formatOptions = [.withFullDate, .withDashSeparatorInDate]
+                """, arguments: [modifier, cutoff])
+            // Parse the local-day string as midnight in the current TZ so
+            // plotted points sit on the right calendar tick.
+            let parser = DateFormatter()
+            parser.dateFormat = "yyyy-MM-dd"
+            parser.timeZone = TimeZone.current
+            parser.locale = Locale(identifier: "en_US_POSIX")
             return rows.compactMap { row -> CostPoint? in
-                guard let dayStr: String = row["day"] else { return nil }
+                guard let dayStr: String = row["day"],
+                      let date = parser.date(from: dayStr) else { return nil }
                 let usd: Double = row["usd"] ?? 0
-                let date = fmt.date(from: dayStr)
-                    ?? Self.fallbackDayParser.date(from: dayStr)
-                guard let date else { return nil }
                 return CostPoint(day: date, usd: usd)
             }
         }

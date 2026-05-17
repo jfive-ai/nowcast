@@ -150,6 +150,17 @@ final class StorageManager {
         return stale.map(\.id)
     }
 
+    /// Most-recent report ID, if any. Used as a synthetic anchor for
+    /// source-health rows on noFreshItems runs (FIX: codex review PR #41).
+    func mostRecentReportID() throws -> UUID? {
+        try dbQueue.read { db in
+            guard let s: String = try String.fetchOne(db,
+                sql: "SELECT id FROM report ORDER BY generated_at DESC LIMIT 1")
+            else { return nil }
+            return UUID(uuidString: s)
+        }
+    }
+
     private func delete(reports: [Report]) throws {
         for r in reports {
             let url = AppPaths.reportURL(for: r.markdownPath)
@@ -159,10 +170,91 @@ final class StorageManager {
         guard !ids.isEmpty else { return }
         try dbQueue.write { db in
             let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
+            // FIX (codex review PR #42): purge FTS shadow rows when their
+            // parent report is deleted, otherwise search returns stale
+            // hits whose detail view would be empty.
+            try db.execute(
+                sql: "DELETE FROM report_fts WHERE report_id IN (\(placeholders))",
+                arguments: StatementArguments(ids)
+            )
+            // Items belonging only to deleted reports should also be
+            // pruned from item_fts. Items remain in `item` (cascade
+            // doesn't cover the FTS table), so we drop their FTS rows
+            // when the join leaves no parent report.
+            try db.execute(sql: """
+                DELETE FROM item_fts
+                WHERE item_id IN (
+                    SELECT i.id FROM item i
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM report_item ri WHERE ri.item_id = i.id
+                    )
+                )
+                """)
             try db.execute(
                 sql: "DELETE FROM report WHERE id IN (\(placeholders))",
                 arguments: StatementArguments(ids)
             )
+        }
+    }
+
+    /// Re-populate `report_fts` and `item_fts` from the canonical tables
+    /// when those FTS tables are detected to be out of sync (e.g. after a
+    /// fresh migration or after a bug emptied them). Idempotent.
+    /// FIX (codex review PR #31): backfill historical reports that
+    /// pre-existed the v8 migration so they're searchable immediately.
+    func backfillFullTextIndexIfNeeded() throws {
+        // Phase 1: discover what needs backfilling (read-only).
+        struct PendingReport { let id: String; let topic: String; let path: String }
+        struct PendingItem { let id: String; let title: String; let snippet: String }
+        let (pendingReports, pendingItems) = try dbQueue.read { db -> ([PendingReport], [PendingItem]) in
+            let reportRows = try Row.fetchAll(db, sql: """
+                SELECT id, topic, markdown_path FROM report
+                WHERE id NOT IN (SELECT report_id FROM report_fts)
+                """)
+            let pr: [PendingReport] = reportRows.compactMap {
+                guard let id: String = $0["id"],
+                      let topic: String = $0["topic"],
+                      let path: String = $0["markdown_path"]
+                else { return nil }
+                return PendingReport(id: id, topic: topic, path: path)
+            }
+            let itemRows = try Row.fetchAll(db, sql: """
+                SELECT id, title, snippet FROM item
+                WHERE id NOT IN (SELECT item_id FROM item_fts)
+                """)
+            let pi: [PendingItem] = itemRows.compactMap {
+                guard let id: String = $0["id"], let title: String = $0["title"] else { return nil }
+                let snippet: String = $0["snippet"] ?? ""
+                return PendingItem(id: id, title: title, snippet: snippet)
+            }
+            return (pr, pi)
+        }
+        guard !pendingReports.isEmpty || !pendingItems.isEmpty else { return }
+
+        // Phase 2: read markdown files OUTSIDE the write transaction —
+        // file-IO errors here are recoverable (we just use an empty body)
+        // and shouldn't roll back the entire transaction.
+        let reportBodies: [(id: String, topic: String, body: String)] =
+            pendingReports.map { pr in
+                let url = AppPaths.reportURL(for: pr.path)
+                let body = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+                return (pr.id, pr.topic, body)
+            }
+
+        // Phase 3: write in a single transaction.
+        try dbQueue.write { db in
+            for r in reportBodies {
+                try db.execute(sql: """
+                    INSERT INTO report_fts (report_id, topic, body)
+                    VALUES (?, ?, ?)
+                    """, arguments: [r.id, r.topic, r.body])
+            }
+            for p in pendingItems {
+                try db.execute(sql: """
+                    INSERT INTO item_fts (item_id, title, snippet)
+                    VALUES (?, ?, ?)
+                    """, arguments: [p.id, p.title, p.snippet])
+            }
         }
     }
 
@@ -528,20 +620,59 @@ final class StorageManager {
         let cleaned = Self.sanitizeFTSQuery(query)
         guard !cleaned.isEmpty else { return [] }
         return try dbQueue.read { db in
+            // FIX (codex review PRs #31/#42): search both `report_fts` AND
+            // `item_fts`. Previously, terms that only appeared in item
+            // titles/snippets were never returned, defeating the search
+            // surface's documented coverage.
+            //
+            // FIX (codex review PR #42): JOIN against `report` so deleted
+            // reports (whose FTS shadow rows weren't purged) don't appear
+            // as ghost hits.
             let reportRows = try Row.fetchAll(db, sql: """
-                SELECT report_id, topic, snippet(report_fts, 2, '<<', '>>', '…', 12) AS snip
-                FROM report_fts
-                WHERE report_fts MATCH ?
+                SELECT f.report_id AS report_id,
+                       r.topic AS topic,
+                       snippet(report_fts, 2, '<<', '>>', '…', 12) AS snip
+                FROM report_fts f
+                JOIN report r ON r.id = f.report_id
+                WHERE f.report_fts MATCH ?
                 ORDER BY rank
                 LIMIT ?
                 """, arguments: [cleaned, limit])
-            return reportRows.compactMap { r -> SearchHit? in
-                guard let rid: String = r["report_id"], let uuid = UUID(uuidString: rid),
+            var hits: [SearchHit] = []
+            var seen = Set<UUID>()
+            for r in reportRows {
+                guard let rid: String = r["report_id"],
+                      let uuid = UUID(uuidString: rid),
                       let topic: String = r["topic"]
-                else { return nil }
+                else { continue }
+                seen.insert(uuid)
                 let snip: String = r["snip"] ?? ""
-                return SearchHit(reportID: uuid, topic: topic, snippet: snip, kind: .report)
+                hits.append(SearchHit(reportID: uuid, topic: topic, snippet: snip, kind: .report))
             }
+            // Item-side: find items whose title/snippet matches, then
+            // bring along the report they were attached to. Excludes
+            // reports already matched on the report side.
+            let itemRows = try Row.fetchAll(db, sql: """
+                SELECT DISTINCT ri.report_id AS report_id,
+                       r.topic AS topic,
+                       snippet(item_fts, 1, '<<', '>>', '…', 12) AS snip
+                FROM item_fts
+                JOIN report_item ri ON ri.item_id = item_fts.item_id
+                JOIN report r       ON r.id = ri.report_id
+                WHERE item_fts MATCH ?
+                LIMIT ?
+                """, arguments: [cleaned, limit])
+            for r in itemRows {
+                guard let rid: String = r["report_id"],
+                      let uuid = UUID(uuidString: rid),
+                      !seen.contains(uuid),
+                      let topic: String = r["topic"]
+                else { continue }
+                seen.insert(uuid)
+                let snip: String = r["snip"] ?? ""
+                hits.append(SearchHit(reportID: uuid, topic: topic, snippet: snip, kind: .item))
+            }
+            return Array(hits.prefix(limit))
         }
     }
 
@@ -600,15 +731,20 @@ final class StorageManager {
                                 THEN (julianday(finished_at) - julianday(started_at)) * 86400.0
                                 ELSE NULL END) AS avg_latency,
                        MAX(started_at) AS last_run_at,
+                       -- FIX (codex review PRs #30/#41): scope last_error to
+                       -- the same time window as the rest of the aggregate
+                       -- so the 30-day view doesn't surface an old error
+                       -- from outside the selected window.
                        (SELECT error_message FROM source_run sr2
                           WHERE sr2.source_kind = sr.source_kind
                             AND sr2.error_message IS NOT NULL
+                            AND sr2.started_at >= ?
                           ORDER BY started_at DESC LIMIT 1) AS last_error
                 FROM source_run sr
                 WHERE started_at >= ?
                 GROUP BY source_kind
                 ORDER BY source_kind
-                """, arguments: [cutoff])
+                """, arguments: [cutoff, cutoff])
             return rows.compactMap { row -> SourceHealth? in
                 guard let kindRaw: String = row["source_kind"],
                       let kind = SourceKind(rawValue: kindRaw),
@@ -687,15 +823,28 @@ final class StorageManager {
 
     /// Headlines of clusters the user dismissed within the last `days` days,
     /// in newest-first order. Feeds the "avoid these themes" prompt hint.
+    ///
+    /// FIX (codex review PR #29): collapse by `target_id` so the same
+    /// cluster headline doesn't crowd out other themes when the user
+    /// applied multiple feedback kinds (e.g. dismiss + thumbs_down) or
+    /// re-added feedback. We pick the most recent feedback timestamp per
+    /// cluster and order by that.
     func recentDismissedHeadlines(days: Int = 30, limit: Int = 10) throws -> [String] {
         let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
         return try dbQueue.read { db in
             try String.fetchAll(db, sql: """
-                SELECT c.headline FROM feedback f
-                JOIN cluster c ON c.id = f.target_id
-                WHERE f.target = 'cluster' AND f.kind IN ('dismiss', 'thumbs_down')
-                  AND f.created_at >= ?
-                ORDER BY f.created_at DESC LIMIT ?
+                SELECT c.headline
+                FROM cluster c
+                JOIN (
+                    SELECT target_id, MAX(created_at) AS last_at
+                    FROM feedback
+                    WHERE target = 'cluster'
+                      AND kind IN ('dismiss', 'thumbs_down')
+                      AND created_at >= ?
+                    GROUP BY target_id
+                ) f ON f.target_id = c.id
+                ORDER BY f.last_at DESC
+                LIMIT ?
                 """, arguments: [cutoff, limit])
         }
     }

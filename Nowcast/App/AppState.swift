@@ -124,6 +124,13 @@ final class AppState: ObservableObject {
             fatalError("Failed to open Nowcast database: \(error)")
         }
 
+        // FIX (codex review PR #31): backfill the FTS index BEFORE the
+        // rest of init() runs. Keychain calls later in this init can
+        // block under certain TCC states, and we want the in-app search
+        // surface to be populated against historical reports the moment
+        // the user opens the window — independent of any prompt.
+        try? storage.backfillFullTextIndexIfNeeded()
+
         self.openAIAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.openAI) ?? ""
         self.anthropicAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.anthropic) ?? ""
         self.youtubeAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.youtube) ?? ""
@@ -141,6 +148,7 @@ final class AppState: ObservableObject {
         self.ollamaModel = UserDefaults.standard.string(forKey: Self.ollamaModelKey) ?? ""
         self.ollamaBaseURL = UserDefaults.standard.string(forKey: Self.ollamaBaseURLKey)
             ?? Self.defaultOllamaBaseURL
+
 
         rebuildPipeline()
         applyRetention()

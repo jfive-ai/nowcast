@@ -23,7 +23,22 @@ struct QueryRewriter {
     /// Rewrites a topic into sub-queries. Returns `[topic]` on any failure
     /// so the pipeline never fails because of the rewriter.
     func rewrite(topic: String) async -> [String] {
-        guard QueryRewriter.shouldRewrite(topic: topic) else { return [topic] }
+        await rewriteTracked(topic: topic).queries
+    }
+
+    /// Result envelope with usage tokens so the pipeline can roll the
+    /// rewriter's cost into the final report's accounting.
+    /// FIX (codex review PR #45).
+    struct TrackedRewrite {
+        let queries: [String]
+        let usage: LLMUsage?
+        let model: String
+    }
+
+    func rewriteTracked(topic: String) async -> TrackedRewrite {
+        guard QueryRewriter.shouldRewrite(topic: topic) else {
+            return TrackedRewrite(queries: [topic], usage: nil, model: model ?? "")
+        }
 
         let prompt = """
         You are helping a topic-briefing app fan out a user's request into 2-4 disjoint, recall-optimized sub-queries. The user gave you:
@@ -39,12 +54,13 @@ struct QueryRewriter {
             let response = try await llm.summarize(prompt: prompt, model: model)
             if let parsed = Self.extractJSON(response.text) {
                 let unique = uniqueNonEmpty(parsed)
-                return unique.isEmpty ? [topic] : Array(unique.prefix(Self.maxSubQueries))
+                let queries = unique.isEmpty ? [topic] : Array(unique.prefix(Self.maxSubQueries))
+                return TrackedRewrite(queries: queries, usage: response.usage, model: response.model)
             }
+            return TrackedRewrite(queries: [topic], usage: response.usage, model: response.model)
         } catch {
-            // Fall through to baseline.
+            return TrackedRewrite(queries: [topic], usage: nil, model: model ?? "")
         }
-        return [topic]
     }
 
     private struct Envelope: Decodable { let subQueries: [String] }

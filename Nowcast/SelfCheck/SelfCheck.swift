@@ -29,13 +29,23 @@ enum SelfCheck {
             if !condition { passed = false }
         }
 
-        let topic = "Self-check topic"
+        // FIX (codex review PR #36): use a unique per-run namespace so
+        // the seen-index never suppresses items from a prior self-check.
+        // Previously the hard-coded `mock.example/one|two` URLs were
+        // persisted in `seen_item` on the first run, making subsequent
+        // self-checks fail with `noFreshItems` until the user manually
+        // pruned. The topic also gets the run id appended so the second
+        // pipeline call exercises the diff path against THIS run's first
+        // report, not whatever historical report happens to match.
+        let runID = UUID().uuidString.prefix(8)
+        let topic = "Self-check topic \(runID)"
 
-        // Build a synthetic adapter that returns two known items.
+        // Build a synthetic adapter that returns two known items, with
+        // URLs namespaced by `runID` so seen_item never collides.
         let adapter = StaticItemsAdapter(kind: .hackerNews, items: [
             RawItem(
-                title: "Item one",
-                url: URL(string: "https://mock.example/one")!,
+                title: "Item one (\(runID))",
+                url: URL(string: "https://mock.example/\(runID)/one")!,
                 publishedAt: Date(),
                 snippet: "Snippet for item one — capturing some text.",
                 transcript: nil,
@@ -43,8 +53,8 @@ enum SelfCheck {
                 author: "selfcheck"
             ),
             RawItem(
-                title: "Item two",
-                url: URL(string: "https://mock.example/two")!,
+                title: "Item two (\(runID))",
+                url: URL(string: "https://mock.example/\(runID)/two")!,
                 publishedAt: Date(),
                 snippet: "Snippet for item two.",
                 transcript: nil,
@@ -96,7 +106,7 @@ enum SelfCheck {
         let secondAdapter = StaticItemsAdapter(kind: .hackerNews, items: [
             RawItem(
                 title: "Item three (diff probe)",
-                url: URL(string: "https://mock.example/three")!,
+                url: URL(string: "https://mock.example/\(runID)/three")!,
                 publishedAt: Date(),
                 snippet: "A different snippet so the seen-index doesn't suppress this run.",
                 transcript: nil,
@@ -105,7 +115,7 @@ enum SelfCheck {
             ),
             RawItem(
                 title: "Item four (diff probe)",
-                url: URL(string: "https://mock.example/four")!,
+                url: URL(string: "https://mock.example/\(runID)/four")!,
                 publishedAt: Date(),
                 snippet: "Another distinct snippet.",
                 transcript: nil,
@@ -155,9 +165,16 @@ enum SelfCheck {
         let hn = health.first(where: { $0.sourceKind == .hackerNews })
         check("P4-5: source_run row recorded for HN", (hn?.runs ?? 0) >= 1)
 
-        // P4-6: FTS search finds the new report
-        let hits = (try? storage.searchReports("Self check")) ?? []
-        check("P4-6: FTS search finds new report (got \(hits.count) hits)", !hits.isEmpty)
+        // P4-6: FTS search finds *this run's* report.
+        // FIX (codex review PR #47): previously asserted only that ANY
+        // hit existed — could false-pass on repeat runs (a prior
+        // self-check's report would satisfy the assertion even if the
+        // current run's indexing failed). Now we search for the unique
+        // `runID` so the hit set is provably this-run.
+        let hits = (try? storage.searchReports(String(runID))) ?? []
+        let hitsForThisRun = hits.filter { $0.reportID == report.id }
+        check("P4-6: FTS finds THIS run's report (\(hitsForThisRun.count) match by id)",
+              !hitsForThisRun.isEmpty)
 
         // P4-7: speech script transforms the markdown (no side-effects).
         let md = (try? storage.loadMarkdown(for: report)) ?? ""

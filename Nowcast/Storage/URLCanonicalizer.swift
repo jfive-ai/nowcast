@@ -15,6 +15,15 @@ enum URLCanonicalizer {
         "igshid", "spm", "_hsenc", "_hsmi", "yclid", "msclkid",
     ]
 
+    // FIX (codex review PR #58): YouTube share-only params are stripped
+    // regardless of which URL form was used (`youtu.be/...` or
+    // `youtube.com/watch?v=...`). Previously only the short form was
+    // normalized, so `youtu.be/abc?t=30` and
+    // `youtube.com/watch?v=abc&t=30` hashed differently.
+    private static let youtubeShareOnly: Set<String> = [
+        "si", "feature", "pp", "t", "ab_channel",
+    ]
+
     static func canonicalize(_ url: URL) -> URL {
         guard var comps = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
             return url
@@ -54,18 +63,22 @@ enum URLCanonicalizer {
         }
 
         // YouTube short → long form.
-        // FIX (review #12): also strip share-only query params on the
-        // short-form URL so `youtu.be/abc?si=foo` collapses to the same
-        // canonical as `youtube.com/watch?v=abc`. Without this, share-link
-        // duplicates leak past dedup.
+        // FIX (review #12, codex review PR #58): strip share-only params
+        // on BOTH youtu.be and youtube.com/watch URLs so identical videos
+        // collapse to the same canonical regardless of which link form
+        // was shared.
         if comps.host == "youtu.be", comps.path.count > 1 {
             let videoID = String(comps.path.dropFirst())
             comps.host = "youtube.com"
             comps.path = "/watch"
-            let shareOnly: Set<String> = ["si", "feature", "pp", "t", "ab_channel"]
-            var qi = (comps.queryItems ?? []).filter { !shareOnly.contains($0.name.lowercased()) }
+            var qi = (comps.queryItems ?? []).filter { !Self.youtubeShareOnly.contains($0.name.lowercased()) }
             qi.insert(URLQueryItem(name: "v", value: videoID), at: 0)
             comps.queryItems = qi
+        } else if comps.host == "youtube.com" || comps.host == "youtube-nocookie.com" {
+            if let items = comps.queryItems {
+                let kept = items.filter { !Self.youtubeShareOnly.contains($0.name.lowercased()) }
+                comps.queryItems = kept.isEmpty ? nil : kept
+            }
         }
 
         return comps.url ?? url

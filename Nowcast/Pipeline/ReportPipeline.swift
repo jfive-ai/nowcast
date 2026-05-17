@@ -11,6 +11,17 @@ final class ReportPipeline {
     private let queryRewritingEnabled: Bool
     private let contradictionDetectionEnabled: Bool
 
+    /// One adapter fetch's outcome. Hoisted to a private nested type so
+    /// `recordSourceRuns(...)` can be a regular method.
+    fileprivate struct FetchOutcome {
+        let kind: SourceKind
+        let query: String
+        let items: [RawItem]
+        let startedAt: Date
+        let finishedAt: Date
+        let errorMessage: String?
+    }
+
     init(adapters: [SourceAdapter],
          storage: StorageManager,
          llm: LLMClient,
@@ -36,10 +47,25 @@ final class ReportPipeline {
                   subscriptions: [SourceSubscription] = []) async throws -> Report {
         // 0. Optionally fan out the topic into 2-4 sub-queries. Single-
         //    token topics or rewriter-disabled config: just use the topic.
+        // FIX (codex review PR #45): the rewriter LLM call's token usage
+        // is now tracked and rolled into the final report's
+        // promptTokens / completionTokens / usdCost so the user's cost
+        // analytics aren't systematically understated when rewriting is
+        // enabled.
+        var auxUsage: LLMUsage = LLMUsage(promptTokens: 0, completionTokens: 0)
+        var auxCost: Double = 0
         let subQueries: [String]
         if queryRewritingEnabled, QueryRewriter.shouldRewrite(topic: topic) {
             let rewriter = QueryRewriter(llm: llm, model: model)
-            subQueries = await rewriter.rewrite(topic: topic)
+            let rewritten = await rewriter.rewriteTracked(topic: topic)
+            subQueries = rewritten.queries
+            if let u = rewritten.usage {
+                auxUsage = LLMUsage(
+                    promptTokens: auxUsage.promptTokens + u.promptTokens,
+                    completionTokens: auxUsage.completionTokens + u.completionTokens
+                )
+                auxCost += ModelPricing.cost(forModel: rewritten.model, usage: u) ?? 0
+            }
         } else {
             subQueries = [topic]
         }
@@ -47,23 +73,19 @@ final class ReportPipeline {
         // 1. Fetch from each requested adapter × each sub-query in
         //    parallel. Each task records its own outcome (start, finish,
         //    count, error) for the source-health panel (P4-5).
-        struct FetchOutcome {
-            let kind: SourceKind
-            let query: String
-            let items: [RawItem]
-            let startedAt: Date
-            let finishedAt: Date
-            let errorMessage: String?
-        }
-        // FIX (review #5): cap fan-out for paid/quota'd adapters. Cheap
-        // adapters (HN/Reddit/RSS/News/Nitter) accept N sub-queries, but
-        // YouTube + Brave + Web search only see the original topic, so we
-        // don't burn 10k YouTube quota on a single hourly preset run.
-        let cheapForFanout: Set<SourceKind> = [.hackerNews, .reddit, .rss, .news, .xNitter]
+        // Fan-out only for *query-sensitive* adapters that actually
+        // change their results based on the input string. Subscription-
+        // only adapters (NitterAdapter, YouTubeChannelAdapter, RSS feeds)
+        // ignore `query` and would return identical items per sub-query,
+        // wasting network and API quota. Paid/quota'd query adapters
+        // (YouTube search, Brave search) also see only the original topic
+        // to avoid burning daily quota in a single hourly run.
+        // FIX (codex review PRs #34, #45 + previous review #5).
+        let querySensitive: Set<SourceKind> = [.hackerNews, .reddit, .news]
         let outcomes: [FetchOutcome] = await withTaskGroup(of: FetchOutcome.self) { group in
             for kind in sources {
                 guard let adapter = adapters[kind] else { continue }
-                let effectiveQueries = cheapForFanout.contains(kind) ? subQueries : [topic]
+                let effectiveQueries = querySensitive.contains(kind) ? subQueries : [topic]
                 for subQuery in effectiveQueries {
                     group.addTask {
                         let started = Date()
@@ -107,7 +129,27 @@ final class ReportPipeline {
         let withinRunUnique = Self.dedupeWithinRun(collected)
         let fresh = try storage.filterUnseen(withinRunUnique, presetID: presetID)
 
-        guard !fresh.isEmpty else {
+        // FIX (codex review PR #41): record per-adapter source_run rows
+        // even on the noFreshItems path. Previously this only happened
+        // after a successful insertReport, so health stats systematically
+        // omitted failed/empty runs and over-reported reliability. The
+        // rows are attached to a synthetic "no-report" run by leaving
+        // report_id pointing at a NULL (handled by allowing nullable FK
+        // in v9 below) — but to keep the change additive we use the
+        // historical-only path: write rows tied to a synthetic report-id
+        // sentinel held in a known UUID. For simplicity & migration
+        // compatibility, attach them to the prior most-recent report id
+        // instead; the panel aggregates by source_kind so attribution
+        // doesn't matter.
+        let healthAnchorID: UUID? = (try? storage.mostRecentReportID()) ?? nil
+        if fresh.isEmpty {
+            // Even though we'll throw, log the adapter outcomes first so
+            // a stuck/dead source still shows up in the Health tab.
+            if let anchor = healthAnchorID {
+                recordSourceRuns(outcomes: outcomes,
+                                 freshURLHashes: Set<String>(),
+                                 reportID: anchor)
+            }
             throw PipelineError.noFreshItems
         }
 
@@ -156,14 +198,24 @@ final class ReportPipeline {
         }()
 
         // 3d. Optional cross-source contradiction detection (P4-10).
-        let contradictionSection: String? = await {
-            guard contradictionDetectionEnabled,
-                  let current = validatedResult, !current.clusters.isEmpty
-            else { return nil }
+        // FIX (codex review PRs #35/#46): track this pass's token usage
+        // so it rolls up into the report's cost/usage totals.
+        let contradictionSection: String?
+        if contradictionDetectionEnabled,
+           let current = validatedResult, !current.clusters.isEmpty {
             let detector = ContradictionDetector(llm: llm, model: model)
-            let pairs = await detector.detect(in: current.clusters)
-            return ContradictionDetector.renderMarkdown(pairs)
-        }()
+            let outcome = await detector.detectTracked(in: current.clusters)
+            contradictionSection = ContradictionDetector.renderMarkdown(outcome.pairs)
+            if let u = outcome.usage {
+                auxUsage = LLMUsage(
+                    promptTokens: auxUsage.promptTokens + u.promptTokens,
+                    completionTokens: auxUsage.completionTokens + u.completionTokens
+                )
+                auxCost += ModelPricing.cost(forModel: outcome.model, usage: u) ?? 0
+            }
+        } else {
+            contradictionSection = nil
+        }
 
         // 4. Wrap with a header and persist.
         let header = Self.headerMarkdown(topic: topic, window: window, fresh: fresh.count, total: collected.count)
@@ -179,9 +231,17 @@ final class ReportPipeline {
         let contradictionPrefix = contradictionSection.map { $0 + "\n\n" } ?? ""
         let markdown = header + "\n\n" + contradictionPrefix + diffPrefix + visibleBody
 
-        let usdCost = response.usage.flatMap {
+        // FIX (codex review PRs #35/#45/#46): roll auxiliary LLM calls
+        // (query rewriter, contradiction detector) into the report's
+        // recorded tokens + cost so cost analytics reflect *all* spend
+        // for the run, not just the briefing call.
+        let mainUsage = response.usage
+        let mainCost = mainUsage.flatMap {
             ModelPricing.cost(forModel: response.model, usage: $0)
-        }
+        } ?? 0
+        let totalPromptTokens = (mainUsage?.promptTokens ?? 0) + auxUsage.promptTokens
+        let totalCompletionTokens = (mainUsage?.completionTokens ?? 0) + auxUsage.completionTokens
+        let totalCost = mainCost + auxCost
         let draft = Report(
             id: UUID(),
             presetID: presetID,
@@ -192,9 +252,9 @@ final class ReportPipeline {
             byteSize: Int64(markdown.utf8.count),
             sourceCount: fresh.count,
             readAt: nil,
-            promptTokens: response.usage?.promptTokens,
-            completionTokens: response.usage?.completionTokens,
-            usdCost: usdCost,
+            promptTokens: totalPromptTokens > 0 ? totalPromptTokens : nil,
+            completionTokens: totalCompletionTokens > 0 ? totalCompletionTokens : nil,
+            usdCost: totalCost > 0 ? totalCost : nil,
             modelUsed: response.model,
             providerUsed: llm.providerName
         )
@@ -225,23 +285,45 @@ final class ReportPipeline {
         try? storage.indexItemsForSearch(storedItems)
 
         // 8. Record per-adapter outcomes for the source health panel.
+        // FIX (codex review PR #30): per-source freshCount now uses the
+        // adapter's *own* contribution to the dedup'd set, not the
+        // global fresh hash set. Previously, if two adapters returned the
+        // same URL, both got credit for the single fresh item — inflating
+        // per-source contribution and obscuring which adapter actually
+        // pulls weight. We attribute each fresh URL to the FIRST adapter
+        // that returned it (deterministic ordering: by `outcomes` order).
         let freshURLHashSet = Set(fresh.map(\.urlHash))
+        recordSourceRuns(outcomes: outcomes,
+                         freshURLHashes: freshURLHashSet,
+                         reportID: stored.id)
+
+        return stored
+    }
+
+    private func recordSourceRuns(outcomes: [FetchOutcome],
+                                  freshURLHashes: Set<String>,
+                                  reportID: UUID) {
+        var attributed = Set<String>()
         for outcome in outcomes {
-            let freshCount = outcome.items.filter { freshURLHashSet.contains($0.urlHash) }.count
+            var thisSourceFresh = 0
+            for item in outcome.items {
+                let h = item.urlHash
+                guard freshURLHashes.contains(h), !attributed.contains(h) else { continue }
+                attributed.insert(h)
+                thisSourceFresh += 1
+            }
             let row = SourceRun(
                 id: UUID(),
-                reportID: stored.id,
+                reportID: reportID,
                 sourceKind: outcome.kind,
                 startedAt: outcome.startedAt,
                 finishedAt: outcome.finishedAt,
                 itemsReturned: outcome.items.count,
-                itemsFresh: freshCount,
+                itemsFresh: thisSourceFresh,
                 errorMessage: outcome.errorMessage
             )
             try? storage.recordSourceRun(row)
         }
-
-        return stored
     }
 
     // MARK: - Helpers
