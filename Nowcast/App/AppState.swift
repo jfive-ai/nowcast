@@ -15,6 +15,8 @@ final class AppState: ObservableObject {
     @Published private(set) var unreadCount: Int = 0
     @Published var lastError: String?
     @Published var isGenerating: Bool = false
+    /// Live state of the in-flight generation (P5-5). `nil` when idle.
+    @Published var generation: GenerationState? = nil
     @Published var isSuggesting: Bool = false
     /// Bound by `ContentView` so external triggers (notifications, menu bar)
     /// can change which report is shown.
@@ -253,14 +255,29 @@ final class AppState: ObservableObject {
             return
         }
         isGenerating = true
-        defer { isGenerating = false }
+        generation = GenerationState(topic: topic, startedAt: Date())
+        defer {
+            isGenerating = false
+            // Keep the final state visible for a moment so the user can
+            // see the "Done" stage land before the overlay dismisses.
+            let toClear = generation
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_200_000_000)
+                if self.generation == toClear { self.generation = nil }
+            }
+        }
         do {
             let report = try await pipeline.generate(
                 topic: topic,
                 window: window,
                 sources: sources,
                 presetID: presetID,
-                subscriptions: subscriptions
+                subscriptions: subscriptions,
+                progress: { [weak self] stage in
+                    Task { @MainActor [weak self] in
+                        self?.generation?.push(stage)
+                    }
+                }
             )
             refresh()
 
@@ -288,6 +305,7 @@ final class AppState: ObservableObject {
             }
         } catch {
             lastError = error.localizedDescription
+            generation?.push(.failed(message: error.localizedDescription))
         }
     }
 
