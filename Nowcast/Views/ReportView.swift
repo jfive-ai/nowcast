@@ -14,6 +14,7 @@ struct ReportView: View {
     @State private var clusterFeedbackKinds: [String: Set<Feedback.Kind>] = [:]
     @State private var chatOpen: Bool = false
     @StateObject private var chatHolder = ChatSessionHolder()
+    @State private var urlIndex: [String: PersistedItem] = [:]
 
     var body: some View {
         HSplitView {
@@ -71,6 +72,8 @@ struct ReportView: View {
             }
             clusterFeedbackKinds = byCluster
             chatHolder.bind(report: report, state: state)
+            // P6-1: build a URL → PersistedItem map for citation hover popovers.
+            urlIndex = MarkdownLinkText.buildIndex(items: state.itemsForReport(report.id))
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -322,7 +325,7 @@ struct ReportView: View {
         // parses as inline markdown for links/emphasis.
         VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(markdown.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, line in
-                MarkdownLineView(line: String(line))
+                MarkdownLineView(line: String(line), urlIndex: urlIndex)
             }
         }
     }
@@ -330,6 +333,7 @@ struct ReportView: View {
 
 private struct MarkdownLineView: View {
     let line: String
+    let urlIndex: [String: PersistedItem]
 
     var body: some View {
         if line.hasPrefix("### ") {
@@ -346,6 +350,14 @@ private struct MarkdownLineView: View {
                 .padding(.top, 8)
         } else if line.isEmpty {
             Text(" ")
+        } else if line.contains("](") {
+            // P6-1: prose with at least one [label](url) gets the hoverable
+            // citation chips below the line; headings + plain text fall
+            // through to the simpler renderer.
+            VStack(alignment: .leading, spacing: 2) {
+                Text(attributed)
+                CitationChipRow(markdown: line, urlIndex: urlIndex)
+            }
         } else {
             Text(attributed)
         }
@@ -364,3 +376,53 @@ private struct MarkdownLineView: View {
         )) ?? AttributedString(line)
     }
 }
+
+/// Renders the hoverable citation chips for a given markdown line (P6-1).
+/// Pulls links out of the line, looks each up in `urlIndex`, and shows a
+/// chip with a popover preview on hover.
+private struct CitationChipRow: View {
+    let markdown: String
+    let urlIndex: [String: PersistedItem]
+
+    var body: some View {
+        let pairs = MarkdownLinkText.split(markdown).compactMap(\.linkPair)
+        HStack(spacing: 4) {
+            ForEach(Array(pairs.enumerated()), id: \.offset) { _, pair in
+                CitationChipButton(label: pair.0, url: pair.1, item: urlIndex[MarkdownLinkText.normalize(pair.1)])
+            }
+        }
+    }
+}
+
+private struct CitationChipButton: View {
+    let label: String
+    let url: String
+    let item: PersistedItem?
+    @State private var isHovering = false
+
+    var body: some View {
+        Link(destination: URL(string: url) ?? URL(string: "about:blank")!) {
+            HStack(spacing: 4) {
+                Image(systemName: "link.circle.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Text(host)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(Color.secondary.opacity(0.10))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .popover(isPresented: $isHovering, arrowEdge: .top) {
+            CitationPopover(label: label, urlString: url, item: item)
+        }
+    }
+
+    private var host: String {
+        URL(string: url)?.host?.replacingOccurrences(of: "www.", with: "") ?? url
+    }
+}
+

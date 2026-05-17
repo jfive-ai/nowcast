@@ -652,6 +652,12 @@ final class AppState: ObservableObject {
         (try? storage.mentions(forEntity: id)) ?? []
     }
 
+    // MARK: - Items (P6-1, P6-2)
+
+    func itemsForReport(_ reportID: UUID) -> [PersistedItem] {
+        (try? storage.itemsForReport(reportID)) ?? []
+    }
+
     /// User-configured model override for the active provider, or nil to let
     /// the LLM client use its built-in default.
     private var activeModelOverride: String? {

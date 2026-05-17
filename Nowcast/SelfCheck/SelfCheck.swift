@@ -215,6 +215,15 @@ enum SelfCheck {
         let sawDone = stages.contains { if case .done = $0 { return true } else { return false } }
         check("P5-5: terminal .done event fired", sawDone)
 
+        // P6-1: markdown link splitter + URL index round-trip.
+        let line = "Item one ([example.com](https://mock.example/one)) wins."
+        let segs = MarkdownLinkText.split(line)
+        let linkCount = segs.compactMap(\.linkPair).count
+        check("P6-1: split() finds 1 link in fixture (got \(linkCount))", linkCount == 1)
+        let reportItems = (try? storage.itemsForReport(report.id)) ?? []
+        let urlIndex = MarkdownLinkText.buildIndex(items: reportItems)
+        check("P6-1: URL index built (\(urlIndex.count) entries)", !urlIndex.isEmpty)
+
         // P5-6: weekly synthesizer produces a digest row when ≥1 daily exists.
         let weeklyPreset = TopicPreset(
             name: "Self-check weekly",
