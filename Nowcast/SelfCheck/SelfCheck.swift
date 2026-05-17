@@ -215,6 +215,12 @@ enum SelfCheck {
         let sawDone = stages.contains { if case .done = $0 { return true } else { return false } }
         check("P5-5: terminal .done event fired", sawDone)
 
+        // P6-2: provenance builder produces ≥1 cluster row with ≥1 supporting item.
+        let provRows = ProvenanceBuilder.build(clusters: clusters, items: items)
+        check("P6-2: ≥1 cluster row built (got \(provRows.count))", provRows.count >= 1)
+        let totalMatched = provRows.flatMap { $0.rows.flatMap(\.supportingItems) }.count
+        check("P6-2: ≥1 supporting item matched (got \(totalMatched))", totalMatched >= 1)
+
         // P6-1: markdown link splitter + URL index round-trip.
         let line = "Item one ([example.com](https://mock.example/one)) wins."
         let segs = MarkdownLinkText.split(line)
