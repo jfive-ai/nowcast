@@ -15,6 +15,8 @@ struct ReportView: View {
     @State private var chatOpen: Bool = false
     @StateObject private var chatHolder = ChatSessionHolder()
     @State private var urlIndex: [String: PersistedItem] = [:]
+    @State private var provenanceOpen: Bool = false
+    @State private var provenanceRows: [ProvenanceBuilder.ClusterRows] = []
 
     var body: some View {
         HSplitView {
@@ -61,6 +63,9 @@ struct ReportView: View {
             if chatOpen, let session = chatHolder.session {
                 ChatDrawerView(session: session)
             }
+            if provenanceOpen {
+                ProvenanceView(rows: provenanceRows)
+            }
         }
         .task(id: report.id) {
             markdown = state.loadMarkdown(for: report)
@@ -73,7 +78,10 @@ struct ReportView: View {
             clusterFeedbackKinds = byCluster
             chatHolder.bind(report: report, state: state)
             // P6-1: build a URL → PersistedItem map for citation hover popovers.
-            urlIndex = MarkdownLinkText.buildIndex(items: state.itemsForReport(report.id))
+            let items = state.itemsForReport(report.id)
+            urlIndex = MarkdownLinkText.buildIndex(items: items)
+            // P6-2: build the provenance rows for the drawer.
+            provenanceRows = ProvenanceBuilder.build(clusters: clusters, items: items)
         }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
@@ -85,11 +93,21 @@ struct ReportView: View {
 
                 Button {
                     chatOpen.toggle()
+                    if chatOpen { provenanceOpen = false }
                 } label: {
                     Label("Chat", systemImage: "bubble.left.and.bubble.right")
                         .foregroundStyle(chatOpen ? Color.accentColor : .secondary)
                 }
                 .help("Ask follow-up questions about this brief")
+
+                Button {
+                    provenanceOpen.toggle()
+                    if provenanceOpen { chatOpen = false }
+                } label: {
+                    Label("Provenance", systemImage: "checkmark.seal")
+                        .foregroundStyle(provenanceOpen ? Color.accentColor : .secondary)
+                }
+                .help("Show which items support each claim")
 
                 Button(action: copyMarkdown) {
                     Label(copyFlash ? "Copied" : "Copy", systemImage: "doc.on.doc")
