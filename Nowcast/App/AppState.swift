@@ -100,6 +100,15 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Cross-brief entity extraction. One cheap LLM call per run, plus
+    /// rule-based fallback. P5-2.
+    @Published var entityExtractionEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(entityExtractionEnabled, forKey: Self.entityExtractionKey)
+            rebuildPipeline()
+        }
+    }
+
     let storage: StorageManager
     private let scheduler = BackgroundScheduler()
 
@@ -108,6 +117,7 @@ final class AppState: ObservableObject {
     static let retentionDaysKey = "nowcast.retention_days"
     static let queryRewritingKey = "nowcast.query_rewriting_enabled"
     static let contradictionDetectionKey = "nowcast.contradiction_detection_enabled"
+    static let entityExtractionKey = "nowcast.entity_extraction_enabled"
     static let defaultRetentionDays = 30
     static let llmProviderKey = "nowcast.llm.provider"
     static let openAIModelKey = "nowcast.llm.openai.model"
@@ -133,6 +143,7 @@ final class AppState: ObservableObject {
             ?? Self.defaultRetentionDays
         self.queryRewritingEnabled = UserDefaults.standard.object(forKey: Self.queryRewritingKey) as? Bool ?? false
         self.contradictionDetectionEnabled = UserDefaults.standard.object(forKey: Self.contradictionDetectionKey) as? Bool ?? false
+        self.entityExtractionEnabled = UserDefaults.standard.object(forKey: Self.entityExtractionKey) as? Bool ?? false
 
         let providerRaw = UserDefaults.standard.string(forKey: Self.llmProviderKey) ?? LLMProvider.openAI.rawValue
         self.llmProvider = LLMProvider(rawValue: providerRaw) ?? .openAI
@@ -304,6 +315,7 @@ final class AppState: ObservableObject {
     enum SidebarSection: String, Hashable {
         case history
         case search
+        case entities
     }
     @Published var sidebarSelection: SidebarSection = .history
 
@@ -526,8 +538,19 @@ final class AppState: ObservableObject {
             llm: llm,
             model: activeModelOverride,
             queryRewritingEnabled: queryRewritingEnabled,
-            contradictionDetectionEnabled: contradictionDetectionEnabled
+            contradictionDetectionEnabled: contradictionDetectionEnabled,
+            entityExtractionEnabled: entityExtractionEnabled
         )
+    }
+
+    // MARK: - Entities (P5-2)
+
+    func topEntities(limit: Int = 100, kind: Entity.Kind? = nil) -> [Entity] {
+        (try? storage.topEntities(limit: limit, kind: kind)) ?? []
+    }
+
+    func mentions(forEntity id: UUID) -> [EntityTimelineRow] {
+        (try? storage.mentions(forEntity: id)) ?? []
     }
 
     /// User-configured model override for the active provider, or nil to let

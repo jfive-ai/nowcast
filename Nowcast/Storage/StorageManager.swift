@@ -731,6 +731,108 @@ final class StorageManager {
         }
     }
 
+    // MARK: - Entities (v10, P5-2)
+
+    /// Upserts an entity by (canonical_name, kind). Returns the row's id —
+    /// either the freshly-inserted one or the existing one.
+    @discardableResult
+    func upsertEntity(name: String, kind: Entity.Kind, at date: Date = Date()) throws -> UUID {
+        try dbQueue.write { db in
+            if let existingID: String = try String.fetchOne(db, sql: """
+                SELECT id FROM entity
+                WHERE canonical_name = ? AND kind = ?
+                LIMIT 1
+                """, arguments: [name, kind.rawValue]) {
+                try db.execute(sql: """
+                    UPDATE entity
+                    SET last_seen_at = ?, mention_count = mention_count + 1
+                    WHERE id = ?
+                    """, arguments: [date, existingID])
+                return UUID(uuidString: existingID) ?? UUID()
+            } else {
+                let newID = UUID()
+                try db.execute(sql: """
+                    INSERT INTO entity
+                      (id, canonical_name, kind, first_seen_at, last_seen_at, mention_count)
+                    VALUES (?, ?, ?, ?, ?, 1)
+                    """, arguments: [
+                        newID.uuidString,
+                        name,
+                        kind.rawValue,
+                        date,
+                        date,
+                    ])
+                return newID
+            }
+        }
+    }
+
+    /// Inserts a mention row. `INSERT OR IGNORE` because the natural key
+    /// (entity, report, cluster) is the primary key — a duplicate just
+    /// no-ops, which is exactly what we want when the extractor runs twice.
+    func recordEntityMention(entityID: UUID, reportID: UUID, clusterID: String?) throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                INSERT OR IGNORE INTO entity_mention (entity_id, report_id, cluster_id)
+                VALUES (?, ?, ?)
+                """, arguments: [
+                    entityID.uuidString,
+                    reportID.uuidString,
+                    clusterID ?? "",
+                ])
+        }
+    }
+
+    /// Top-N entities ordered by mention count (desc), then last_seen.
+    func topEntities(limit: Int = 50, kind: Entity.Kind? = nil) throws -> [Entity] {
+        try dbQueue.read { db in
+            let kindClause = kind.map { "WHERE kind = '\($0.rawValue)'" } ?? ""
+            return try Row.fetchAll(db, sql: """
+                SELECT id, canonical_name, kind, first_seen_at, last_seen_at, mention_count
+                FROM entity
+                \(kindClause)
+                ORDER BY mention_count DESC, last_seen_at DESC
+                LIMIT ?
+                """, arguments: [limit]).compactMap(Self.makeEntity)
+        }
+    }
+
+    /// Every report (with optional cluster headline) where this entity is mentioned.
+    func mentions(forEntity entityID: UUID) throws -> [EntityTimelineRow] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT r.id, r.preset_id, r.topic, r.window, r.generated_at, r.markdown_path,
+                       r.byte_size, r.source_count, r.read_at,
+                       r.prompt_tokens, r.completion_tokens, r.usd_cost, r.model_used, r.provider_used,
+                       em.cluster_id AS cluster_id,
+                       c.headline AS cluster_headline
+                FROM entity_mention em
+                JOIN report r ON r.id = em.report_id
+                LEFT JOIN cluster c ON c.id = em.cluster_id
+                WHERE em.entity_id = ?
+                ORDER BY r.generated_at DESC
+                """, arguments: [entityID.uuidString]).compactMap { row -> EntityTimelineRow? in
+                    guard let report = Self.makeReport(from: row) else { return nil }
+                    let clusterID: String? = {
+                        let raw: String? = row["cluster_id"]
+                        let trimmed = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        return trimmed.isEmpty ? nil : trimmed
+                    }()
+                    return EntityTimelineRow(
+                        report: report,
+                        clusterID: clusterID,
+                        clusterHeadline: row["cluster_headline"]
+                    )
+                }
+        }
+    }
+
+    func entityCount() throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM entity") ?? 0
+        }
+    }
+
     // MARK: - Seen-item dedup
 
     /// Returns only items whose URL hashes haven't been recorded for this preset.
@@ -898,6 +1000,26 @@ final class StorageManager {
             kind: kind,
             note: row["note"],
             createdAt: createdAt
+        )
+    }
+
+    private static func makeEntity(from row: Row) -> Entity? {
+        guard let idString: String = row["id"],
+              let id = UUID(uuidString: idString),
+              let name: String = row["canonical_name"],
+              let kindRaw: String = row["kind"],
+              let kind = Entity.Kind(rawValue: kindRaw),
+              let firstSeen: Date = row["first_seen_at"],
+              let lastSeen: Date = row["last_seen_at"],
+              let mentions: Int = row["mention_count"]
+        else { return nil }
+        return Entity(
+            id: id,
+            canonicalName: name,
+            kind: kind,
+            firstSeenAt: firstSeen,
+            lastSeenAt: lastSeen,
+            mentionCount: mentions
         )
     }
 

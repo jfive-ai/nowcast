@@ -162,6 +162,25 @@ enum SelfCheck {
             check("P5-1: last conversation turn is assistant", last.role == .assistant)
         }
 
+        // P5-2: entity extraction persists ≥1 entity + mention.
+        let briefing = BriefingResult(
+            tldr: ["t"],
+            clusters: clusters.map { c in
+                BriefingResult.Cluster(id: c.id, headline: c.headline, summary: c.summary, claims: c.claims, citations: c.citations)
+            },
+            signal: "s",
+            lowConfidence: false
+        )
+        let extractor = EntityExtractor(llm: MockLLMClient())
+        await extractor.enrich(briefing: briefing, reportID: report.id, storage: storage)
+        let entityCount = (try? storage.entityCount()) ?? 0
+        check("P5-2: ≥1 entity persisted (got \(entityCount))", entityCount >= 1)
+        let topEntity = (try? storage.topEntities(limit: 1).first)
+        if let top = topEntity ?? nil {
+            let timeline = (try? storage.mentions(forEntity: top.id)) ?? []
+            check("P5-2: top entity has ≥1 mention (got \(timeline.count))", !timeline.isEmpty)
+        }
+
         lines.append("")
         lines.append("Final: \(passed ? "PASS" : "FAIL")  ·  report id: \(report.id.uuidString.prefix(8))")
         return Result(passed: passed, lines: lines)
