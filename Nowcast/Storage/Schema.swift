@@ -258,6 +258,14 @@ enum Schema {
             }
         }
 
+        // v13: smart auto-generated brief titles (P7-2). Nullable column;
+        // history / report header fall back to topic when nil.
+        m.registerMigration("v13") { db in
+            try db.alter(table: "report") { t in
+                t.add(column: "title", .text)
+            }
+        }
+
         return m
     }
 
