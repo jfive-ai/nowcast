@@ -215,6 +215,15 @@ enum SelfCheck {
         let sawDone = stages.contains { if case .done = $0 { return true } else { return false } }
         check("P5-5: terminal .done event fired", sawDone)
 
+        // P6-3: BriefDiff.diff against an identical-cluster set returns all
+        // continuing (no new, no dropped). Sanity check that the existing
+        // diff algorithm we're surfacing in the compare view still behaves.
+        let selfDelta = BriefDiff.diff(current: clusters, prior: clusters)
+        check("P6-3: self-diff has 0 new clusters", selfDelta.newClusters.isEmpty)
+        check("P6-3: self-diff has 0 dropped clusters", selfDelta.droppedClusters.isEmpty)
+        check("P6-3: self-diff marks all clusters continuing (got \(selfDelta.continuingClusters.count))",
+              selfDelta.continuingClusters.count == clusters.count)
+
         // P6-2: provenance builder produces ≥1 cluster row with ≥1 supporting item.
         let provRows = ProvenanceBuilder.build(clusters: clusters, items: items)
         check("P6-2: ≥1 cluster row built (got \(provRows.count))", provRows.count >= 1)
