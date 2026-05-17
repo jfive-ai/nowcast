@@ -4,6 +4,7 @@ import SwiftUI
 /// to create a new one; pass an existing preset to edit it in place.
 struct TopicPresetEditor: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var state: AppState
 
     let original: TopicPreset?
     let onSave: (TopicPreset) -> Void
@@ -19,6 +20,10 @@ struct TopicPresetEditor: View {
     @State private var weeklyTime: Date
     @State private var deliveryNotification: Bool
     @State private var deliveryMenuBar: Bool
+    @State private var deliveryWebhookEnabled: Bool
+    @State private var deliveryWebhookURL: String
+    @State private var deliveryWebhookFormat: WebhookFormat
+    @State private var webhookTestStatus: String?
 
     init(preset: TopicPreset?, onSave: @escaping (TopicPreset) -> Void) {
         self.original = preset
@@ -59,6 +64,11 @@ struct TopicPresetEditor: View {
         let channels = preset?.deliveryChannels ?? [.inApp]
         _deliveryNotification = State(initialValue: channels.contains(.notification))
         _deliveryMenuBar = State(initialValue: channels.contains(.menuBar))
+        let existingWebhook = channels.compactMap(\.webhookConfig).first
+        _deliveryWebhookEnabled = State(initialValue: existingWebhook != nil)
+        _deliveryWebhookURL = State(initialValue: existingWebhook?.url ?? "")
+        _deliveryWebhookFormat = State(initialValue: existingWebhook?.format ?? .generic)
+        _webhookTestStatus = State(initialValue: nil)
     }
 
     var body: some View {
@@ -124,6 +134,34 @@ struct TopicPresetEditor: View {
                 Section("Delivery") {
                     Toggle("macOS notification", isOn: $deliveryNotification)
                     Toggle("Menu bar badge", isOn: $deliveryMenuBar)
+
+                    Toggle("Webhook (Slack / Discord / generic JSON)", isOn: $deliveryWebhookEnabled)
+                    if deliveryWebhookEnabled {
+                        TextField("Webhook URL", text: $deliveryWebhookURL)
+                            .textFieldStyle(.roundedBorder)
+                            .onChange(of: deliveryWebhookURL) { newValue in
+                                let detected = WebhookFormat.detect(from: newValue)
+                                if detected != .generic { deliveryWebhookFormat = detected }
+                                webhookTestStatus = nil
+                            }
+                        Picker("Format", selection: $deliveryWebhookFormat) {
+                            ForEach(WebhookFormat.allCases) { f in
+                                Text(f.displayName).tag(f)
+                            }
+                        }
+                        HStack {
+                            Button("Send test") {
+                                runWebhookTest()
+                            }
+                            .disabled(deliveryWebhookURL.trimmingCharacters(in: .whitespaces).isEmpty)
+                            if let status = webhookTestStatus {
+                                Text(status)
+                                    .font(.caption)
+                                    .foregroundStyle(status.hasPrefix("OK") ? .green : .red)
+                            }
+                        }
+                    }
+
                     Text("Reports always appear in History.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -168,6 +206,25 @@ struct TopicPresetEditor: View {
         return ""
     }
 
+    private func runWebhookTest() {
+        let url = deliveryWebhookURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !url.isEmpty else { return }
+        let cfg = WebhookConfig(url: url, format: deliveryWebhookFormat)
+        webhookTestStatus = "Sending…"
+        Task {
+            let outcome = await state.sendWebhookTest(config: cfg)
+            await MainActor.run {
+                if outcome.isSuccess {
+                    webhookTestStatus = "OK (\(outcome.status ?? 200))"
+                } else if let status = outcome.status {
+                    webhookTestStatus = "HTTP \(status)"
+                } else {
+                    webhookTestStatus = "Error: \(outcome.errorMessage ?? "unknown")"
+                }
+            }
+        }
+    }
+
     private func binding(for kind: SourceKind) -> Binding<Bool> {
         Binding(
             get: { sources.contains(kind) },
@@ -201,6 +258,10 @@ struct TopicPresetEditor: View {
         var channels: [DeliveryChannel] = [.inApp]
         if deliveryNotification { channels.append(.notification) }
         if deliveryMenuBar { channels.append(.menuBar) }
+        let trimmedURL = deliveryWebhookURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        if deliveryWebhookEnabled, !trimmedURL.isEmpty {
+            channels.append(.webhook(WebhookConfig(url: trimmedURL, format: deliveryWebhookFormat)))
+        }
 
         let orderedSources = SourceKind.allCases.filter { sources.contains($0) }
 
