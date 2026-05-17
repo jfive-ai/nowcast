@@ -207,12 +207,33 @@ struct ReportView: View {
             Text(cluster.summary)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            if let cp = cluster.counterpoint {
+                counterpointRow(symbol: "exclamationmark.triangle", color: .orange, label: "Counter", text: cp)
+            }
+            if let gap = cluster.gap {
+                counterpointRow(symbol: "questionmark.circle", color: .blue, label: "Not covered", text: gap)
+            }
         }
         .padding(8)
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(Color.secondary.opacity(0.06))
         )
+    }
+
+    @ViewBuilder
+    private func counterpointRow(symbol: String, color: Color, label: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: symbol)
+                .foregroundStyle(color)
+                .font(.caption)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label).font(.caption2).bold().foregroundStyle(color)
+                Text(text).font(.caption)
+            }
+        }
+        .padding(6)
+        .background(RoundedRectangle(cornerRadius: 4).fill(color.opacity(0.08)))
     }
 
     @ViewBuilder

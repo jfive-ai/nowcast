@@ -371,8 +371,8 @@ final class StorageManager {
                 let clusterUUID = UUID()
                 let citationsJSON = (try? Self.encodeJSON(cluster.citations)) ?? "[]"
                 try db.execute(sql: """
-                    INSERT INTO cluster (id, report_id, headline, summary, ord, citations_json)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO cluster (id, report_id, headline, summary, ord, citations_json, counterpoint, gap)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, arguments: [
                         clusterUUID.uuidString,
                         reportID.uuidString,
@@ -380,6 +380,8 @@ final class StorageManager {
                         cluster.summary,
                         idx,
                         citationsJSON,
+                        cluster.counterpoint,
+                        cluster.gap,
                     ])
                 for (cidx, claim) in cluster.claims.enumerated() {
                     let claimCitationsJSON = (try? Self.encodeJSON(claim.citations)) ?? "[]"
@@ -408,7 +410,7 @@ final class StorageManager {
     func clusters(for reportID: UUID) throws -> [BriefingResult.Cluster] {
         try dbQueue.read { db in
             let rows = try Row.fetchAll(db, sql: """
-                SELECT id, headline, summary, ord, citations_json
+                SELECT id, headline, summary, ord, citations_json, counterpoint, gap
                 FROM cluster
                 WHERE report_id = ?
                 ORDER BY ord ASC
@@ -421,6 +423,8 @@ final class StorageManager {
                       let citationsJSON: String = row["citations_json"]
                 else { continue }
                 let citations: [String] = (try? decodeJSON(citationsJSON)) ?? []
+                let counterpoint: String? = row["counterpoint"]
+                let gap: String? = row["gap"]
                 let claimRows = try Row.fetchAll(db, sql: """
                     SELECT text, citations_json
                     FROM claim
@@ -438,7 +442,9 @@ final class StorageManager {
                     headline: headline,
                     summary: summary,
                     claims: claims,
-                    citations: citations
+                    citations: citations,
+                    counterpoint: counterpoint,
+                    gap: gap
                 ))
             }
             return out

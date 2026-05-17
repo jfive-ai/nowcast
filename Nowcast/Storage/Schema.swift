@@ -235,6 +235,15 @@ enum Schema {
             try db.create(indexOn: "entity_mention", columns: ["report_id"])
         }
 
+        // v11: per-cluster steel-man counterpoint + "what's not covered"
+        // gap (P5-3). Both columns are nullable; old clusters stay valid.
+        m.registerMigration("v11") { db in
+            try db.alter(table: "cluster") { t in
+                t.add(column: "counterpoint", .text)
+                t.add(column: "gap", .text)
+            }
+        }
+
         return m
     }
 
