@@ -276,6 +276,13 @@ final class AppState: ObservableObject {
                 if preset.deliveryChannels.contains(.email) {
                     await sendEmailDigest(report: report)
                 }
+                // P5-4: webhook delivery. Each preset can have N webhook
+                // channels; each one POSTs independently. Failures land
+                // in `lastError` but never block the report from saving.
+                for channel in preset.deliveryChannels {
+                    guard let cfg = channel.webhookConfig, !cfg.url.isEmpty else { continue }
+                    await deliverWebhook(report: report, config: cfg)
+                }
                 // .menuBar and .inApp surface implicitly via the menu bar
                 // and history list; no extra side effect needed.
             }
@@ -433,6 +440,26 @@ final class AppState: ObservableObject {
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    private func deliverWebhook(report: Report, config: WebhookConfig) async {
+        let markdown = (try? storage.loadMarkdown(for: report)) ?? ""
+        let clusters = (try? storage.clusters(for: report.id)) ?? []
+        let outcome = await WebhookDeliverer.deliver(
+            report: report,
+            markdown: markdown,
+            clusters: clusters,
+            config: config
+        )
+        if !outcome.isSuccess {
+            let label = outcome.status.map { "HTTP \($0)" } ?? (outcome.errorMessage ?? "unknown error")
+            lastError = "Webhook \(config.format.displayName) failed: \(label)"
+        }
+    }
+
+    /// Used by the "Send test" button in `TopicPresetEditor`.
+    func sendWebhookTest(config: WebhookConfig) async -> WebhookDeliverer.Outcome {
+        await WebhookDeliverer.sendTest(config: config)
     }
 
     private func sendEmailDigest(report: Report) async {
