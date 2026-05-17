@@ -109,6 +109,25 @@ struct ReportView: View {
                 }
                 .help("Show which items support each claim")
 
+                Menu {
+                    if let prior = state.priorReport(for: report) {
+                        Button("Compare with prior (\(prior.generatedAt.formatted(date: .abbreviated, time: .omitted)))") {
+                            state.compareSelection = AppState.ComparePair(left: prior, right: report)
+                        }
+                        Divider()
+                    }
+                    ForEach(state.candidateReportsForCompare(report)) { other in
+                        Button(other.generatedAt.formatted(date: .abbreviated, time: .shortened)) {
+                            state.compareSelection = AppState.ComparePair(left: other, right: report)
+                        }
+                    }
+                } label: {
+                    Label("Compare", systemImage: "rectangle.lefthalf.inset.filled.arrow.left")
+                }
+                .help("Compare this brief with another on the same topic")
+                .menuStyle(.borderlessButton)
+                .disabled(state.candidateReportsForCompare(report).isEmpty)
+
                 Button(action: copyMarkdown) {
                     Label(copyFlash ? "Copied" : "Copy", systemImage: "doc.on.doc")
                 }

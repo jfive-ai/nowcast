@@ -658,6 +658,37 @@ final class AppState: ObservableObject {
         (try? storage.itemsForReport(reportID)) ?? []
     }
 
+    // MARK: - Compare (P6-3)
+
+    /// Reports the user can plausibly compare with `report` — same preset
+    /// (if any), otherwise same topic string; never the report itself.
+    /// Newest-first, capped at `limit`.
+    func candidateReportsForCompare(_ report: Report, limit: Int = 10) -> [Report] {
+        let same = reports.filter { other in
+            guard other.id != report.id else { return false }
+            if let pid = report.presetID {
+                return other.presetID == pid
+            }
+            return other.topic.caseInsensitiveCompare(report.topic) == .orderedSame
+        }
+        return Array(same.prefix(limit))
+    }
+
+    /// Looks up the chronologically-prior report on the same topic/preset.
+    /// Convenience for the "Compare with prior" shortcut.
+    func priorReport(for report: Report) -> Report? {
+        candidateReportsForCompare(report).first { $0.generatedAt < report.generatedAt }
+    }
+
+    /// In-app navigation target for the compare view.
+    @Published var compareSelection: ComparePair?
+
+    struct ComparePair: Hashable, Identifiable {
+        let left: Report
+        let right: Report
+        var id: String { "\(left.id.uuidString)-\(right.id.uuidString)" }
+    }
+
     /// User-configured model override for the active provider, or nil to let
     /// the LLM client use its built-in default.
     private var activeModelOverride: String? {

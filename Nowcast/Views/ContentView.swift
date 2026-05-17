@@ -28,7 +28,19 @@ struct ContentView: View {
             }
             .frame(minWidth: 280)
         } detail: {
-            if let report = selectedReport {
+            if let pair = state.compareSelection {
+                CompareReportsView(left: pair.left, right: pair.right)
+                    .id(pair.id)
+                    .toolbar {
+                        ToolbarItem(placement: .navigation) {
+                            Button {
+                                state.compareSelection = nil
+                            } label: {
+                                Label("Close", systemImage: "xmark.circle")
+                            }
+                        }
+                    }
+            } else if let report = selectedReport {
                 ReportView(report: report)
                     .id(report.id)
                     .onAppear { state.markRead(reportID: report.id) }
