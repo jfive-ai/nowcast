@@ -45,12 +45,17 @@ final class ReportPipeline {
     }
 
     /// Generate a report. Throws if no items are found at all (caller decides
-    /// whether to surface that as "nothing new this run").
+    /// whether to surface that as "nothing new this run"). Optional
+    /// `progress` callback fires with `PipelineStage` events so the UI can
+    /// render a live timeline (P5-5).
     func generate(topic: String,
                   window: TimeWindow,
                   sources: [SourceKind],
                   presetID: UUID? = nil,
-                  subscriptions: [SourceSubscription] = []) async throws -> Report {
+                  subscriptions: [SourceSubscription] = [],
+                  progress: (@Sendable (PipelineStage) -> Void)? = nil) async throws -> Report {
+        @Sendable func emit(_ s: PipelineStage) { progress?(s) }
+        emit(.started(topic: topic, sourceCount: sources.count))
         // 0. Optionally fan out the topic into 2-4 sub-queries. Single-
         //    token topics or rewriter-disabled config: just use the topic.
         // FIX (codex review PR #45): the rewriter LLM call's token usage
@@ -62,6 +67,7 @@ final class ReportPipeline {
         var auxCost: Double = 0
         let subQueries: [String]
         if queryRewritingEnabled, QueryRewriter.shouldRewrite(topic: topic) {
+            emit(.rewriting)
             let rewriter = QueryRewriter(llm: llm, model: model)
             let rewritten = await rewriter.rewriteTracked(topic: topic)
             subQueries = rewritten.queries
@@ -91,6 +97,7 @@ final class ReportPipeline {
         let outcomes: [FetchOutcome] = await withTaskGroup(of: FetchOutcome.self) { group in
             for kind in sources {
                 guard let adapter = adapters[kind] else { continue }
+                emit(.fetching(kind))
                 let effectiveQueries = querySensitive.contains(kind) ? subQueries : [topic]
                 for subQuery in effectiveQueries {
                     group.addTask {
@@ -127,11 +134,16 @@ final class ReportPipeline {
             return all
         }
         let collected: [RawItem] = outcomes.flatMap(\.items)
+        // Emit a per-source "fetched" event in stable display order.
+        for outcome in outcomes {
+            emit(.fetched(outcome.kind, itemCount: outcome.items.count))
+        }
 
         // 2. Dedupe within this run by URL hash, then against persistent seen-index.
         //    Note: we *check* the seen-index but do not record yet — recording
         //    only happens after a successful insert, otherwise a network
         //    failure would permanently blacklist items.
+        emit(.deduping(beforeCount: collected.count))
         let withinRunUnique = Self.dedupeWithinRun(collected)
         let fresh = try storage.filterUnseen(withinRunUnique, presetID: presetID)
 
@@ -176,11 +188,14 @@ final class ReportPipeline {
             items: fresh,
             avoidHint: avoidHint
         )
+        emit(.llmRequested)
         let response = try await llm.summarize(prompt: prompt, model: model)
+        emit(.llmReceived(tokens: response.usage?.totalTokens))
 
         // 3b. Try to extract the structured trailing JSON block. If the
         //     model didn't emit one, or it failed to parse, gracefully fall
         //     back to the visible markdown so the user still gets a brief.
+        emit(.validating)
         let extracted = BriefingExtractor.extract(from: response.text)
         var validatedResult: BriefingResult? = extracted.result.map {
             CitationValidator.filter($0, againstInputs: fresh)
@@ -191,6 +206,7 @@ final class ReportPipeline {
         //      and a rendered markdown section can be appended below.
         if counterpointsEnabled,
            let current = validatedResult, !current.clusters.isEmpty {
+            emit(.writingCounterpoints)
             let agent = CounterpointAgent(llm: llm, model: model)
             validatedResult = await agent.annotate(current, items: fresh)
         }
@@ -236,6 +252,7 @@ final class ReportPipeline {
         }
 
         // 4. Wrap with a header and persist.
+        emit(.writing)
         let header = Self.headerMarkdown(topic: topic, window: window, fresh: fresh.count, total: collected.count)
         // FIX (review #2): if the LLM emitted ONLY the JSON block with no
         // surrounding markdown (extractor strips both, leaving a
@@ -301,6 +318,7 @@ final class ReportPipeline {
             //     ignore failures, ignore empty results, never block the
             //     report. Toggle in Settings keeps this opt-in for cost.
             if entityExtractionEnabled {
+                emit(.enrichingEntities)
                 let extractor = EntityExtractor(llm: llm, model: model)
                 await extractor.enrich(briefing: validated, reportID: stored.id, storage: storage)
             }
@@ -324,6 +342,7 @@ final class ReportPipeline {
                          freshURLHashes: freshURLHashSet,
                          reportID: stored.id)
 
+        emit(.done(reportID: stored.id))
         return stored
     }
 
