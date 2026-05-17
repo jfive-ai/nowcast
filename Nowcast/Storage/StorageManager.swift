@@ -405,43 +405,58 @@ final class StorageManager {
     }
 
     /// Load the clusters (+ claims) for a given report, ordered by `ord`.
+    /// FIX (review #3): single LEFT JOIN query — was N+1 (1 query for
+    /// clusters, then 1 per cluster for its claims). On hot paths (every
+    /// `ReportView.task` selection + every diff run) this matters.
     func clusters(for reportID: UUID) throws -> [BriefingResult.Cluster] {
         try dbQueue.read { db in
             let rows = try Row.fetchAll(db, sql: """
-                SELECT id, headline, summary, ord, citations_json
-                FROM cluster
-                WHERE report_id = ?
-                ORDER BY ord ASC
+                SELECT c.id AS cid,
+                       c.headline,
+                       c.summary,
+                       c.ord            AS c_ord,
+                       c.citations_json AS c_citations_json,
+                       cl.text          AS cl_text,
+                       cl.citations_json AS cl_citations_json,
+                       cl.ord           AS cl_ord
+                FROM cluster c
+                LEFT JOIN claim cl ON cl.cluster_id = c.id
+                WHERE c.report_id = ?
+                ORDER BY c.ord ASC, cl.ord ASC
                 """, arguments: [reportID.uuidString])
-            var out: [BriefingResult.Cluster] = []
+            // Group rows by cluster id, preserving the SQL ordering.
+            var buckets: [(id: String,
+                           headline: String,
+                           summary: String,
+                           citations: [String],
+                           claims: [BriefingResult.Claim])] = []
             for row in rows {
-                guard let cid: String = row["id"],
+                guard let cid: String = row["cid"],
                       let headline: String = row["headline"],
                       let summary: String = row["summary"],
-                      let citationsJSON: String = row["citations_json"]
+                      let citationsJSON: String = row["c_citations_json"]
                 else { continue }
-                let citations: [String] = (try? decodeJSON(citationsJSON)) ?? []
-                let claimRows = try Row.fetchAll(db, sql: """
-                    SELECT text, citations_json
-                    FROM claim
-                    WHERE cluster_id = ?
-                    ORDER BY ord ASC
-                    """, arguments: [cid])
-                let claims: [BriefingResult.Claim] = claimRows.compactMap { r in
-                    guard let text: String = r["text"],
-                          let cj: String = r["citations_json"] else { return nil }
-                    let cits: [String] = (try? decodeJSON(cj)) ?? []
-                    return BriefingResult.Claim(text: text, citations: cits)
+                if buckets.last?.id != cid {
+                    let citations: [String] = (try? Self.decodeJSON(citationsJSON)) ?? []
+                    buckets.append((cid, headline, summary, citations, []))
                 }
-                out.append(BriefingResult.Cluster(
-                    id: cid,
-                    headline: headline,
-                    summary: summary,
-                    claims: claims,
-                    citations: citations
-                ))
+                if let claimText: String = row["cl_text"],
+                   let claimCJ: String = row["cl_citations_json"] {
+                    let cits: [String] = (try? Self.decodeJSON(claimCJ)) ?? []
+                    buckets[buckets.count - 1].claims.append(
+                        BriefingResult.Claim(text: claimText, citations: cits)
+                    )
+                }
             }
-            return out
+            return buckets.map { b in
+                BriefingResult.Cluster(
+                    id: b.id,
+                    headline: b.headline,
+                    summary: b.summary,
+                    claims: b.claims,
+                    citations: b.citations
+                )
+            }
         }
     }
 
@@ -571,6 +586,10 @@ final class StorageManager {
     func sourceHealth(days: Int = 30) throws -> [SourceHealth] {
         let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
         return try dbQueue.read { db in
+            // FIX (review #4): correlated subquery folded into the main
+            // SELECT instead of a per-row follow-up query — eliminates the
+            // N+1 in the prior implementation. SQLite resolves the
+            // subquery once per aggregate row.
             let rows = try Row.fetchAll(db, sql: """
                 SELECT source_kind,
                        COUNT(*) AS runs,
@@ -580,8 +599,12 @@ final class StorageManager {
                        AVG(CASE WHEN finished_at IS NOT NULL
                                 THEN (julianday(finished_at) - julianday(started_at)) * 86400.0
                                 ELSE NULL END) AS avg_latency,
-                       MAX(started_at) AS last_run_at
-                FROM source_run
+                       MAX(started_at) AS last_run_at,
+                       (SELECT error_message FROM source_run sr2
+                          WHERE sr2.source_kind = sr.source_kind
+                            AND sr2.error_message IS NOT NULL
+                          ORDER BY started_at DESC LIMIT 1) AS last_error
+                FROM source_run sr
                 WHERE started_at >= ?
                 GROUP BY source_kind
                 ORDER BY source_kind
@@ -596,12 +619,7 @@ final class StorageManager {
                 let totalFresh: Int = row["total_fresh"] ?? 0
                 let avgLatency: Double? = row["avg_latency"]
                 let lastRunAt: Date? = row["last_run_at"]
-
-                let lastError: String? = (try? String.fetchOne(db, sql: """
-                    SELECT error_message FROM source_run
-                    WHERE source_kind = ? AND error_message IS NOT NULL
-                    ORDER BY started_at DESC LIMIT 1
-                    """, arguments: [kindRaw])) ?? nil
+                let lastError: String? = row["last_error"]
 
                 return SourceHealth(
                     sourceKind: kind,
@@ -688,17 +706,22 @@ final class StorageManager {
     /// Hashes are NOT recorded here — the caller should call
     /// `recordSeen(_:presetID:)` after a successful LLM/persist round-trip,
     /// so a network failure doesn't permanently blacklist items.
+    ///
+    /// FIX (review #7): batch the lookup with a single `IN (...)` query.
+    /// Previously this was N round-trips per call (one per item); with the
+    /// seen_item index growing across the user's history that compounded.
     func filterUnseen(_ items: [RawItem], presetID: UUID?) throws -> [RawItem] {
+        guard !items.isEmpty else { return [] }
         let presetKey = presetID?.uuidString
         return try dbQueue.read { db in
-            var fresh: [RawItem] = []
-            for item in items {
-                let exists = try Bool.fetchOne(db, sql: """
-                    SELECT 1 FROM seen_item WHERE preset_id IS ? AND url_hash = ? LIMIT 1
-                    """, arguments: [presetKey, item.urlHash]) ?? false
-                if !exists { fresh.append(item) }
-            }
-            return fresh
+            let hashes = items.map(\.urlHash)
+            let placeholders = Array(repeating: "?", count: hashes.count).joined(separator: ",")
+            var args: [(any DatabaseValueConvertible)?] = [presetKey]
+            args.append(contentsOf: hashes.map { $0 as (any DatabaseValueConvertible)? })
+            let seen: Set<String> = try Set(String.fetchAll(db,
+                sql: "SELECT url_hash FROM seen_item WHERE preset_id IS ? AND url_hash IN (\(placeholders))",
+                arguments: StatementArguments(args)))
+            return items.filter { !seen.contains($0.urlHash) }
         }
     }
 
