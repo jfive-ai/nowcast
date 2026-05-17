@@ -6,7 +6,7 @@ import Foundation
 /// reparsing free-form markdown.
 struct BriefingResult: Codable, Equatable {
     let tldr: [String]
-    let clusters: [Cluster]
+    var clusters: [Cluster]
     let signal: String
     let lowConfidence: Bool
 
@@ -16,31 +16,27 @@ struct BriefingResult: Codable, Equatable {
         let summary: String
         let claims: [Claim]
         let citations: [String]
+        /// P5-3: optional steel-manned counter-argument for the cluster's
+        /// dominant framing. `nil` when the agent declined to invent one.
+        var counterpoint: String?
+        /// P5-3: optional "what this brief doesn't cover" note — a short
+        /// pointer at the missing context.
+        var gap: String?
 
-        // FIX (codex review PR #27): `id` is decoded as optional and
-        // synthesized when the model omits it. `saveBriefing` always
-        // generates a fresh UUID anyway, so the decoded `id` only matters
-        // for in-memory traversal — failing the whole payload because of
-        // a missing `id` discarded an otherwise-usable brief.
-        private enum CodingKeys: String, CodingKey {
-            case id, headline, summary, claims, citations
-        }
-
-        init(id: String, headline: String, summary: String, claims: [Claim], citations: [String]) {
+        init(id: String,
+             headline: String,
+             summary: String,
+             claims: [Claim],
+             citations: [String],
+             counterpoint: String? = nil,
+             gap: String? = nil) {
             self.id = id
             self.headline = headline
             self.summary = summary
             self.claims = claims
             self.citations = citations
-        }
-
-        init(from decoder: Decoder) throws {
-            let c = try decoder.container(keyedBy: CodingKeys.self)
-            self.id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? UUID().uuidString
-            self.headline = try c.decode(String.self, forKey: .headline)
-            self.summary = try c.decode(String.self, forKey: .summary)
-            self.claims = (try? c.decodeIfPresent([Claim].self, forKey: .claims)) ?? []
-            self.citations = (try? c.decodeIfPresent([String].self, forKey: .citations)) ?? []
+            self.counterpoint = counterpoint
+            self.gap = gap
         }
     }
 

@@ -132,6 +132,14 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                Toggle(isOn: counterpointsBinding) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Counterpoints (steel-man)")
+                        Text("Per-cluster strongest counter-argument and \"what's not covered\" gap. One extra LLM call per brief; refuses to invent.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
 #if DEBUG
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -242,6 +250,13 @@ struct SettingsView: View {
         Binding(
             get: { state.entityExtractionEnabled },
             set: { state.entityExtractionEnabled = $0 }
+        )
+    }
+
+    private var counterpointsBinding: Binding<Bool> {
+        Binding(
+            get: { state.counterpointsEnabled },
+            set: { state.counterpointsEnabled = $0 }
         )
     }
 

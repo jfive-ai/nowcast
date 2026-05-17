@@ -463,8 +463,8 @@ final class StorageManager {
                 let clusterUUID = UUID()
                 let citationsJSON = (try? Self.encodeJSON(cluster.citations)) ?? "[]"
                 try db.execute(sql: """
-                    INSERT INTO cluster (id, report_id, headline, summary, ord, citations_json)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                    INSERT INTO cluster (id, report_id, headline, summary, ord, citations_json, counterpoint, gap)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, arguments: [
                         clusterUUID.uuidString,
                         reportID.uuidString,
@@ -472,6 +472,8 @@ final class StorageManager {
                         cluster.summary,
                         idx,
                         citationsJSON,
+                        cluster.counterpoint,
+                        cluster.gap,
                     ])
                 for (cidx, claim) in cluster.claims.enumerated() {
                     let claimCitationsJSON = (try? Self.encodeJSON(claim.citations)) ?? "[]"
@@ -497,58 +499,50 @@ final class StorageManager {
     }
 
     /// Load the clusters (+ claims) for a given report, ordered by `ord`.
-    /// FIX (review #3): single LEFT JOIN query — was N+1 (1 query for
-    /// clusters, then 1 per cluster for its claims). On hot paths (every
-    /// `ReportView.task` selection + every diff run) this matters.
+    /// FIX (P5-3 rebase): rewritten to use a single per-cluster claim
+    /// fetch and to pass through the new `counterpoint` / `gap` columns
+    /// added by schema v11.
     func clusters(for reportID: UUID) throws -> [BriefingResult.Cluster] {
         try dbQueue.read { db in
             let rows = try Row.fetchAll(db, sql: """
-                SELECT c.id AS cid,
-                       c.headline,
-                       c.summary,
-                       c.ord            AS c_ord,
-                       c.citations_json AS c_citations_json,
-                       cl.text          AS cl_text,
-                       cl.citations_json AS cl_citations_json,
-                       cl.ord           AS cl_ord
-                FROM cluster c
-                LEFT JOIN claim cl ON cl.cluster_id = c.id
-                WHERE c.report_id = ?
-                ORDER BY c.ord ASC, cl.ord ASC
+                SELECT id, headline, summary, ord, citations_json, counterpoint, gap
+                FROM cluster
+                WHERE report_id = ?
+                ORDER BY ord ASC
                 """, arguments: [reportID.uuidString])
-            // Group rows by cluster id, preserving the SQL ordering.
-            var buckets: [(id: String,
-                           headline: String,
-                           summary: String,
-                           citations: [String],
-                           claims: [BriefingResult.Claim])] = []
+            var out: [BriefingResult.Cluster] = []
             for row in rows {
-                guard let cid: String = row["cid"],
+                guard let cid: String = row["id"],
                       let headline: String = row["headline"],
                       let summary: String = row["summary"],
-                      let citationsJSON: String = row["c_citations_json"]
+                      let citationsJSON: String = row["citations_json"]
                 else { continue }
-                if buckets.last?.id != cid {
-                    let citations: [String] = (try? Self.decodeJSON(citationsJSON)) ?? []
-                    buckets.append((cid, headline, summary, citations, []))
+                let citations: [String] = (try? decodeJSON(citationsJSON)) ?? []
+                let counterpoint: String? = row["counterpoint"]
+                let gap: String? = row["gap"]
+                let claimRows = try Row.fetchAll(db, sql: """
+                    SELECT text, citations_json
+                    FROM claim
+                    WHERE cluster_id = ?
+                    ORDER BY ord ASC
+                    """, arguments: [cid])
+                let claims: [BriefingResult.Claim] = claimRows.compactMap { r in
+                    guard let text: String = r["text"],
+                          let cj: String = r["citations_json"] else { return nil }
+                    let cits: [String] = (try? decodeJSON(cj)) ?? []
+                    return BriefingResult.Claim(text: text, citations: cits)
                 }
-                if let claimText: String = row["cl_text"],
-                   let claimCJ: String = row["cl_citations_json"] {
-                    let cits: [String] = (try? Self.decodeJSON(claimCJ)) ?? []
-                    buckets[buckets.count - 1].claims.append(
-                        BriefingResult.Claim(text: claimText, citations: cits)
-                    )
-                }
+                out.append(BriefingResult.Cluster(
+                    id: cid,
+                    headline: headline,
+                    summary: summary,
+                    claims: claims,
+                    citations: citations,
+                    counterpoint: counterpoint,
+                    gap: gap
+                ))
             }
-            return buckets.map { b in
-                BriefingResult.Cluster(
-                    id: b.id,
-                    headline: b.headline,
-                    summary: b.summary,
-                    claims: b.claims,
-                    citations: b.citations
-                )
-            }
+            return out
         }
     }
 
