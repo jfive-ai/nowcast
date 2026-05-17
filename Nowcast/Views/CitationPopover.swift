@@ -5,6 +5,7 @@ import SwiftUI
 /// exists in the brief's source set; otherwise a minimal preview of just
 /// the URL host.
 struct CitationPopover: View {
+    @EnvironmentObject private var state: AppState
     let label: String
     let urlString: String
     let item: PersistedItem?
@@ -22,6 +23,7 @@ struct CitationPopover: View {
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
+                reliabilityBadge
                 Spacer()
                 if let date = item?.publishedAt {
                     Text(date, style: .date)
@@ -62,5 +64,28 @@ struct CitationPopover: View {
 
     private var host: String {
         URL(string: urlString)?.host?.replacingOccurrences(of: "www.", with: "") ?? urlString
+    }
+
+    @ViewBuilder
+    private var reliabilityBadge: some View {
+        if let rel = state.reliability(for: host) {
+            HStack(spacing: 3) {
+                Image(systemName: rel.band == .ok ? "checkmark.seal.fill" :
+                      rel.band == .mixed ? "questionmark.circle" : "exclamationmark.triangle.fill")
+                    .font(.caption2)
+                Text(rel.band.displayName)
+                    .font(.caption2.bold())
+            }
+            .foregroundStyle(colorForBand(rel.band))
+            .help("Host reliability: \(rel.score)/100 across \(rel.mentions) mentions")
+        }
+    }
+
+    private func colorForBand(_ band: SourceReliability.Band) -> Color {
+        switch band {
+        case .ok:    return .green
+        case .mixed: return .yellow
+        case .watch: return .red
+        }
     }
 }
