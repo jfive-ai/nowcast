@@ -207,6 +207,34 @@ enum Schema {
                           columns: ["report_id", "created_at"])
         }
 
+        // v10: cross-brief entity index (P5-2). One row per canonical
+        // (name, kind); mention rows fan out to (entity, report, cluster).
+        m.registerMigration("v10") { db in
+            try db.create(table: "entity") { t in
+                t.column("id", .text).primaryKey()
+                t.column("canonical_name", .text).notNull()
+                t.column("kind", .text).notNull()
+                t.column("first_seen_at", .datetime).notNull()
+                t.column("last_seen_at", .datetime).notNull()
+                t.column("mention_count", .integer).notNull().defaults(to: 0)
+                t.uniqueKey(["canonical_name", "kind"])
+            }
+            try db.create(indexOn: "entity", columns: ["mention_count"])
+
+            try db.create(table: "entity_mention") { t in
+                t.column("entity_id", .text)
+                    .notNull()
+                    .references("entity", onDelete: .cascade)
+                t.column("report_id", .text)
+                    .notNull()
+                    .references("report", onDelete: .cascade)
+                t.column("cluster_id", .text)
+                t.primaryKey(["entity_id", "report_id", "cluster_id"])
+            }
+            try db.create(indexOn: "entity_mention", columns: ["entity_id"])
+            try db.create(indexOn: "entity_mention", columns: ["report_id"])
+        }
+
         return m
     }
 

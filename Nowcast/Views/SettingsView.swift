@@ -124,6 +124,14 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                Toggle(isOn: entityExtractionBinding) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Entity extraction")
+                        Text("Build a cross-brief entity index (people, orgs, projects, tickers). One cheap LLM call per run; falls back to a rule-based extractor offline.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
 #if DEBUG
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -227,6 +235,13 @@ struct SettingsView: View {
         Binding(
             get: { state.contradictionDetectionEnabled },
             set: { state.contradictionDetectionEnabled = $0 }
+        )
+    }
+
+    private var entityExtractionBinding: Binding<Bool> {
+        Binding(
+            get: { state.entityExtractionEnabled },
+            set: { state.entityExtractionEnabled = $0 }
         )
     }
 
