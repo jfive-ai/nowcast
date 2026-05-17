@@ -215,6 +215,18 @@ enum SelfCheck {
         let sawDone = stages.contains { if case .done = $0 { return true } else { return false } }
         check("P5-5: terminal .done event fired", sawDone)
 
+        // P7-2: smart titler produces a non-empty headline distinct from the topic.
+        let titler = SmartTitler(llm: MockLLMClient())
+        let headline = await titler.title(
+            topic: topic,
+            tldr: ["a", "b"],
+            clusterHeadlines: clusters.map(\.headline)
+        )
+        check("P7-2: smart titler returned a headline", headline?.isEmpty == false)
+        if let h = headline {
+            check("P7-2: headline differs from raw topic", h != topic)
+        }
+
         // P7-1: source reliability formula band sanity.
         check("P7-1: all-thumbs-up host scores ≥70",
               SourceReliability.formula(mentions: 5, thumbsUp: 5, thumbsDown: 0, hallucinations: 0) >= 70)

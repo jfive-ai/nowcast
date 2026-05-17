@@ -140,6 +140,14 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                Toggle(isOn: smartTitlesBinding) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Smart auto-titles")
+                        Text("Auto-generate a one-line headline per brief. One small extra LLM call per run.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
 #if DEBUG
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -257,6 +265,13 @@ struct SettingsView: View {
         Binding(
             get: { state.counterpointsEnabled },
             set: { state.counterpointsEnabled = $0 }
+        )
+    }
+
+    private var smartTitlesBinding: Binding<Bool> {
+        Binding(
+            get: { state.smartTitlesEnabled },
+            set: { state.smartTitlesEnabled = $0 }
         )
     }
 

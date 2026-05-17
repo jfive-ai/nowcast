@@ -37,6 +37,13 @@ struct Report: Identifiable, Codable, Hashable {
     /// Discriminates daily briefs from synthesized weekly digests (P5-6).
     /// Defaults to .daily for rows that pre-dated the v12 migration.
     var kind: Kind
+    /// P7-2: optional LLM-generated headline summarizing the brief. Nil
+    /// when the smart-titles toggle is off or the call failed; UI falls
+    /// back to `topic`.
+    var title: String?
+
+    /// What the UI should show: smart title when present, otherwise topic.
+    var displayTitle: String { (title?.isEmpty == false ? title : nil) ?? topic }
 
     init(id: UUID,
          presetID: UUID?,
@@ -52,7 +59,8 @@ struct Report: Identifiable, Codable, Hashable {
          usdCost: Double? = nil,
          modelUsed: String? = nil,
          providerUsed: String? = nil,
-         kind: Kind = .daily) {
+         kind: Kind = .daily,
+         title: String? = nil) {
         self.id = id
         self.presetID = presetID
         self.topic = topic
@@ -68,6 +76,7 @@ struct Report: Identifiable, Codable, Hashable {
         self.modelUsed = modelUsed
         self.providerUsed = providerUsed
         self.kind = kind
+        self.title = title
     }
 
     var isUnread: Bool { readAt == nil }
