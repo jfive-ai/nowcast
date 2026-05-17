@@ -34,9 +34,19 @@ private struct HistoryRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(report.topic)
-                .font(.body)
-                .lineLimit(1)
+            HStack(spacing: 6) {
+                if report.kind == .weeklyDigest {
+                    Label("Weekly", systemImage: "calendar.badge.clock")
+                        .font(.caption2.bold())
+                        .padding(.horizontal, 6).padding(.vertical, 2)
+                        .background(Color.purple.opacity(0.18))
+                        .foregroundStyle(Color.purple)
+                        .clipShape(Capsule())
+                }
+                Text(report.topic)
+                    .font(.body)
+                    .lineLimit(1)
+            }
             HStack(spacing: 6) {
                 Text(report.generatedAt, style: .date)
                 Text("·")

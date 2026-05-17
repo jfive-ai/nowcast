@@ -244,6 +244,20 @@ enum Schema {
             }
         }
 
+        // v12: report.kind discriminator + per-preset weekly-digest opt-in
+        // (P5-6). Existing rows backfill to 'daily'. last_weekly_at on the
+        // preset records when the synth last ran so the scheduler can
+        // decide eligibility.
+        m.registerMigration("v12") { db in
+            try db.alter(table: "report") { t in
+                t.add(column: "kind", .text).notNull().defaults(to: "daily")
+            }
+            try db.alter(table: "topic_preset") { t in
+                t.add(column: "weekly_digest_enabled", .integer).notNull().defaults(to: 0)
+                t.add(column: "last_weekly_at", .datetime)
+            }
+        }
+
         return m
     }
 
