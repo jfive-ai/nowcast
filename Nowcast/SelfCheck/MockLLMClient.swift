@@ -105,6 +105,8 @@ struct MockLLMClient: LLMClient {
     ]}
     """
 
+    static let cannedSmartTitle: String = "Pectra lands May 22 as restaking TVL crosses 5.6M"
+
     func summarize(prompt: String, model: String?) async throws -> LLMResponse {
         // Heuristic routing: the rewriter, contradiction detector, entity
         // extractor, and briefing prompt are distinct enough that we can
@@ -120,6 +122,8 @@ struct MockLLMClient: LLMClient {
             text = Self.cannedCounterpointsEnvelope
         } else if prompt.contains("follow-up topic presets") {
             text = Self.cannedFollowUpsEnvelope
+        } else if prompt.contains("Write a single 6-12 word") {
+            text = Self.cannedSmartTitle
         } else {
             text = Self.cannedBrief
         }

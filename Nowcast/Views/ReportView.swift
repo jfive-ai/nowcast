@@ -24,7 +24,7 @@ struct ReportView: View {
         HSplitView {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(report.topic)
+                    Text(report.displayTitle)
                         .font(.largeTitle).bold()
 
                     HStack(spacing: 6) {

@@ -43,7 +43,7 @@ private struct HistoryRow: View {
                         .foregroundStyle(Color.purple)
                         .clipShape(Capsule())
                 }
-                Text(report.topic)
+                Text(report.displayTitle)
                     .font(.body)
                     .lineLimit(1)
             }

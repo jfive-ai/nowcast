@@ -120,6 +120,15 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Smart auto-generated brief titles. One small extra LLM call per
+    /// brief. P7-2.
+    @Published var smartTitlesEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(smartTitlesEnabled, forKey: Self.smartTitlesKey)
+            rebuildPipeline()
+        }
+    }
+
     let storage: StorageManager
     private let scheduler = BackgroundScheduler()
 
@@ -130,6 +139,7 @@ final class AppState: ObservableObject {
     static let contradictionDetectionKey = "nowcast.contradiction_detection_enabled"
     static let entityExtractionKey = "nowcast.entity_extraction_enabled"
     static let counterpointsKey = "nowcast.counterpoints_enabled"
+    static let smartTitlesKey = "nowcast.smart_titles_enabled"
     static let defaultRetentionDays = 30
     static let llmProviderKey = "nowcast.llm.provider"
     static let openAIModelKey = "nowcast.llm.openai.model"
@@ -157,6 +167,7 @@ final class AppState: ObservableObject {
         self.contradictionDetectionEnabled = UserDefaults.standard.object(forKey: Self.contradictionDetectionKey) as? Bool ?? false
         self.entityExtractionEnabled = UserDefaults.standard.object(forKey: Self.entityExtractionKey) as? Bool ?? false
         self.counterpointsEnabled = UserDefaults.standard.object(forKey: Self.counterpointsKey) as? Bool ?? false
+        self.smartTitlesEnabled = UserDefaults.standard.object(forKey: Self.smartTitlesKey) as? Bool ?? false
 
         let providerRaw = UserDefaults.standard.string(forKey: Self.llmProviderKey) ?? LLMProvider.openAI.rawValue
         self.llmProvider = LLMProvider(rawValue: providerRaw) ?? .openAI
@@ -638,7 +649,8 @@ final class AppState: ObservableObject {
             queryRewritingEnabled: queryRewritingEnabled,
             contradictionDetectionEnabled: contradictionDetectionEnabled,
             entityExtractionEnabled: entityExtractionEnabled,
-            counterpointsEnabled: counterpointsEnabled
+            counterpointsEnabled: counterpointsEnabled,
+            smartTitlesEnabled: smartTitlesEnabled
         )
     }
 

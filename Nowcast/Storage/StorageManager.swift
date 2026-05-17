@@ -33,8 +33,8 @@ final class StorageManager {
                 try db.execute(sql: """
                     INSERT INTO report
                       (id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
-                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, arguments: [
                         report.id.uuidString,
                         report.presetID?.uuidString,
@@ -51,6 +51,7 @@ final class StorageManager {
                         report.modelUsed,
                         report.providerUsed,
                         report.kind.rawValue,
+                        report.title,
                     ])
             }
         } catch {
@@ -75,7 +76,8 @@ final class StorageManager {
             usdCost: report.usdCost,
             modelUsed: report.modelUsed,
             providerUsed: report.providerUsed,
-            kind: report.kind
+            kind: report.kind,
+            title: report.title
         )
         return stored
     }
@@ -84,7 +86,7 @@ final class StorageManager {
         try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
-                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title
                 FROM report
                 ORDER BY generated_at DESC
                 """).compactMap(Self.makeReport)
@@ -98,7 +100,7 @@ final class StorageManager {
         return try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
-                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title
                 FROM report
                 WHERE preset_id = ? AND kind = 'daily' AND generated_at >= ?
                 ORDER BY generated_at ASC
@@ -151,7 +153,7 @@ final class StorageManager {
         let oldest = try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
-                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title
                 FROM report
                 ORDER BY generated_at ASC
                 LIMIT ?
@@ -167,7 +169,7 @@ final class StorageManager {
         let stale = try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
-                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title
                 FROM report
                 WHERE generated_at < ?
                 """, arguments: [cutoff]).compactMap(Self.makeReport)
@@ -491,7 +493,7 @@ final class StorageManager {
             if let presetID {
                 row = try Row.fetchOne(db, sql: """
                     SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
-                           prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind
+                           prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title
                     FROM report
                     WHERE preset_id = ? AND generated_at < ?
                     ORDER BY generated_at DESC LIMIT 1
@@ -499,7 +501,7 @@ final class StorageManager {
             } else {
                 row = try Row.fetchOne(db, sql: """
                     SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
-                           prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind
+                           prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title
                     FROM report
                     WHERE preset_id IS NULL AND topic = ? AND generated_at < ?
                     ORDER BY generated_at DESC LIMIT 1
@@ -1022,6 +1024,7 @@ final class StorageManager {
 
         let kindRaw: String = row["kind"] ?? "daily"
         let kind = Report.Kind(rawValue: kindRaw) ?? .daily
+        let title: String? = row["title"]
 
         return Report(
             id: id,
@@ -1038,7 +1041,8 @@ final class StorageManager {
             usdCost: usdCost,
             modelUsed: modelUsed,
             providerUsed: providerUsed,
-            kind: kind
+            kind: kind,
+            title: title
         )
     }
 

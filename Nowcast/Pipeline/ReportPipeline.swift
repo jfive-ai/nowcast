@@ -12,6 +12,7 @@ final class ReportPipeline {
     private let contradictionDetectionEnabled: Bool
     private let entityExtractionEnabled: Bool
     private let counterpointsEnabled: Bool
+    private let smartTitlesEnabled: Bool
 
     init(adapters: [SourceAdapter],
          storage: StorageManager,
@@ -20,7 +21,8 @@ final class ReportPipeline {
          queryRewritingEnabled: Bool = false,
          contradictionDetectionEnabled: Bool = false,
          entityExtractionEnabled: Bool = false,
-         counterpointsEnabled: Bool = false) {
+         counterpointsEnabled: Bool = false,
+         smartTitlesEnabled: Bool = false) {
         var map: [SourceKind: SourceAdapter] = [:]
         for adapter in adapters { map[adapter.kind] = adapter }
         self.adapters = map
@@ -31,6 +33,7 @@ final class ReportPipeline {
         self.contradictionDetectionEnabled = contradictionDetectionEnabled
         self.entityExtractionEnabled = entityExtractionEnabled
         self.counterpointsEnabled = counterpointsEnabled
+        self.smartTitlesEnabled = smartTitlesEnabled
     }
 
     /// Generate a report. Throws if no items are found at all (caller decides
@@ -205,6 +208,22 @@ final class ReportPipeline {
         let usdCost = response.usage.flatMap {
             ModelPricing.cost(forModel: response.model, usage: $0)
         }
+
+        // P7-2: optional smart-title call. Best-effort; nil falls back to topic.
+        let smartTitle: String?
+        if smartTitlesEnabled,
+           let validated = validatedResult,
+           !validated.clusters.isEmpty {
+            let titler = SmartTitler(llm: llm, model: model)
+            smartTitle = await titler.title(
+                topic: topic,
+                tldr: validated.tldr,
+                clusterHeadlines: validated.clusters.map(\.headline)
+            )
+        } else {
+            smartTitle = nil
+        }
+
         let draft = Report(
             id: UUID(),
             presetID: presetID,
@@ -219,7 +238,8 @@ final class ReportPipeline {
             completionTokens: response.usage?.completionTokens,
             usdCost: usdCost,
             modelUsed: response.model,
-            providerUsed: llm.providerName
+            providerUsed: llm.providerName,
+            title: smartTitle
         )
         let stored = try storage.insertReport(draft, markdown: markdown)
 
