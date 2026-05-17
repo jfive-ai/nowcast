@@ -61,6 +61,9 @@ enum SelfCheck {
             contradictionDetectionEnabled: false
         )
 
+        // P5-5: collect emitted stages.
+        let collector = StageCollector()
+
         let report: Report
         do {
             report = try await pipeline.generate(
@@ -68,7 +71,10 @@ enum SelfCheck {
                 window: .today,
                 sources: [.hackerNews],
                 presetID: nil,
-                subscriptions: []
+                subscriptions: [],
+                progress: { stage in
+                    collector.append(stage)
+                }
             )
         } catch {
             return Result(passed: false, lines: ["✗ Pipeline.generate threw: \(error.localizedDescription)"])
@@ -203,6 +209,12 @@ enum SelfCheck {
         let detected = WebhookFormat.detect(from: "https://hooks.slack.com/services/AAA/BBB/CCC")
         check("P5-4: format detection identifies Slack", detected == .slack)
 
+        // P5-5: pipeline emitted ≥3 stage events including a terminal done.
+        let stages = collector.snapshot()
+        check("P5-5: ≥3 pipeline stage events emitted (got \(stages.count))", stages.count >= 3)
+        let sawDone = stages.contains { if case .done = $0 { return true } else { return false } }
+        check("P5-5: terminal .done event fired", sawDone)
+
         lines.append("")
         lines.append("Final: \(passed ? "PASS" : "FAIL")  ·  report id: \(report.id.uuidString.prefix(8))")
         return Result(passed: passed, lines: lines)
@@ -216,6 +228,21 @@ private struct StaticItemsAdapter: SourceAdapter {
     let items: [RawItem]
     func fetch(query: String, window: TimeWindow, subscriptions: [SourceSubscription]) async throws -> [RawItem] {
         return items
+    }
+}
+
+/// Sendable-safe sink that lets the self-check capture pipeline progress
+/// events from the (non-isolated) callback.
+private final class StageCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stages: [PipelineStage] = []
+    func append(_ stage: PipelineStage) {
+        lock.lock(); defer { lock.unlock() }
+        stages.append(stage)
+    }
+    func snapshot() -> [PipelineStage] {
+        lock.lock(); defer { lock.unlock() }
+        return stages
     }
 }
 #endif
