@@ -181,6 +181,14 @@ enum SelfCheck {
             check("P5-2: top entity has ≥1 mention (got \(timeline.count))", !timeline.isEmpty)
         }
 
+        // P5-3: counterpoint agent enriches ≥1 cluster (or all are null).
+        let cpAgent = CounterpointAgent(llm: MockLLMClient())
+        let annotated = await cpAgent.annotate(briefing)
+        let withCP = annotated.clusters.filter { $0.counterpoint != nil || $0.gap != nil }.count
+        check("P5-3: counterpoint agent annotated ≥1 cluster (got \(withCP))", withCP >= 1)
+        let section = CounterpointAgent.renderMarkdownSection(for: annotated)
+        check("P5-3: markdown section rendered", section?.contains("Counterpoints") == true)
+
         lines.append("")
         lines.append("Final: \(passed ? "PASS" : "FAIL")  ·  report id: \(report.id.uuidString.prefix(8))")
         return Result(passed: passed, lines: lines)

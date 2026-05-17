@@ -109,6 +109,15 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Steel-man counter-argument + "what's not covered" pass. One extra
+    /// LLM call per brief. P5-3.
+    @Published var counterpointsEnabled: Bool {
+        didSet {
+            UserDefaults.standard.set(counterpointsEnabled, forKey: Self.counterpointsKey)
+            rebuildPipeline()
+        }
+    }
+
     let storage: StorageManager
     private let scheduler = BackgroundScheduler()
 
@@ -118,6 +127,7 @@ final class AppState: ObservableObject {
     static let queryRewritingKey = "nowcast.query_rewriting_enabled"
     static let contradictionDetectionKey = "nowcast.contradiction_detection_enabled"
     static let entityExtractionKey = "nowcast.entity_extraction_enabled"
+    static let counterpointsKey = "nowcast.counterpoints_enabled"
     static let defaultRetentionDays = 30
     static let llmProviderKey = "nowcast.llm.provider"
     static let openAIModelKey = "nowcast.llm.openai.model"
@@ -144,6 +154,7 @@ final class AppState: ObservableObject {
         self.queryRewritingEnabled = UserDefaults.standard.object(forKey: Self.queryRewritingKey) as? Bool ?? false
         self.contradictionDetectionEnabled = UserDefaults.standard.object(forKey: Self.contradictionDetectionKey) as? Bool ?? false
         self.entityExtractionEnabled = UserDefaults.standard.object(forKey: Self.entityExtractionKey) as? Bool ?? false
+        self.counterpointsEnabled = UserDefaults.standard.object(forKey: Self.counterpointsKey) as? Bool ?? false
 
         let providerRaw = UserDefaults.standard.string(forKey: Self.llmProviderKey) ?? LLMProvider.openAI.rawValue
         self.llmProvider = LLMProvider(rawValue: providerRaw) ?? .openAI
@@ -539,7 +550,8 @@ final class AppState: ObservableObject {
             model: activeModelOverride,
             queryRewritingEnabled: queryRewritingEnabled,
             contradictionDetectionEnabled: contradictionDetectionEnabled,
-            entityExtractionEnabled: entityExtractionEnabled
+            entityExtractionEnabled: entityExtractionEnabled,
+            counterpointsEnabled: counterpointsEnabled
         )
     }
 
