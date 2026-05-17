@@ -30,17 +30,36 @@ struct ContradictionDetector {
     /// Detect contradictions across all claims in the given clusters.
     /// Returns an empty array on any error or thin input.
     func detect(in clusters: [BriefingResult.Cluster]) async -> [Contradiction] {
+        await detectTracked(in: clusters).pairs
+    }
+
+    /// Result envelope with usage tokens so the pipeline can include the
+    /// contradiction-pass spend in the report's cost accounting.
+    /// FIX (codex review PRs #35, #46).
+    struct TrackedDetection {
+        let pairs: [Contradiction]
+        let usage: LLMUsage?
+        let model: String
+    }
+
+    func detectTracked(in clusters: [BriefingResult.Cluster]) async -> TrackedDetection {
         let claims = clusters.flatMap { cluster in
             cluster.claims.map { $0.text }
         }
-        guard claims.count >= Self.minClaimsToScan else { return [] }
+        guard claims.count >= Self.minClaimsToScan else {
+            return TrackedDetection(pairs: [], usage: nil, model: model ?? "")
+        }
 
         let prompt = renderPrompt(claims: claims)
         do {
             let response = try await llm.summarize(prompt: prompt, model: model)
-            return Self.parse(response.text)
+            return TrackedDetection(
+                pairs: Self.parse(response.text),
+                usage: response.usage,
+                model: response.model
+            )
         } catch {
-            return []
+            return TrackedDetection(pairs: [], usage: nil, model: model ?? "")
         }
     }
 
