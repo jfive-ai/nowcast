@@ -865,6 +865,79 @@ final class StorageManager {
         }
     }
 
+    // MARK: - Source reliability (P7-1)
+
+    /// Per-host reliability rows. Joins items → report_item → cluster →
+    /// feedback to count thumbs-up / thumbs-down / hallucinations against
+    /// the clusters where each host's items appeared.
+    func sourceReliability(limit: Int = 50) throws -> [SourceReliability] {
+        struct Row: Hashable {
+            var mentions = 0
+            var thumbsUp = 0
+            var thumbsDown = 0
+            var hallucinations = 0
+        }
+        var byHost: [String: Row] = [:]
+
+        try dbQueue.read { db in
+            let items = try GRDB.Row.fetchAll(db, sql: """
+                SELECT i.canonical_url AS url, c.id AS cluster_id
+                FROM item i
+                JOIN report_item ri ON ri.item_id = i.id
+                LEFT JOIN cluster c ON c.report_id = ri.report_id
+                """)
+
+            // Bucket items by host first; then look up feedback per cluster.
+            var clusterIDsByHost: [String: Set<String>] = [:]
+            for row in items {
+                let urlString: String = row["url"] ?? ""
+                guard let host = URL(string: urlString)?.host?.lowercased() else { continue }
+                let normalizedHost = host.replacingOccurrences(of: "www.", with: "")
+                byHost[normalizedHost, default: Row()].mentions += 1
+                if let cid: String = row["cluster_id"] {
+                    clusterIDsByHost[normalizedHost, default: []].insert(cid)
+                }
+            }
+
+            for (host, cids) in clusterIDsByHost {
+                guard !cids.isEmpty else { continue }
+                let placeholders = Array(repeating: "?", count: cids.count).joined(separator: ",")
+                let counts = try GRDB.Row.fetchAll(db, sql: """
+                    SELECT kind, COUNT(*) AS n FROM feedback
+                    WHERE target = 'cluster' AND target_id IN (\(placeholders))
+                    GROUP BY kind
+                    """, arguments: StatementArguments(cids))
+                for c in counts {
+                    let kind: String = c["kind"] ?? ""
+                    let n: Int = c["n"] ?? 0
+                    switch kind {
+                    case "thumbs_up":     byHost[host]?.thumbsUp += n
+                    case "thumbs_down":   byHost[host]?.thumbsDown += n
+                    case "hallucination": byHost[host]?.hallucinations += n
+                    default: break
+                    }
+                }
+            }
+        }
+
+        let rows = byHost.map { host, r in
+            SourceReliability(
+                host: host,
+                mentions: r.mentions,
+                thumbsUp: r.thumbsUp,
+                thumbsDown: r.thumbsDown,
+                hallucinations: r.hallucinations,
+                score: SourceReliability.formula(
+                    mentions: r.mentions,
+                    thumbsUp: r.thumbsUp,
+                    thumbsDown: r.thumbsDown,
+                    hallucinations: r.hallucinations
+                )
+            )
+        }
+        return Array(rows.sorted { $0.mentions > $1.mentions }.prefix(limit))
+    }
+
     func entityCount() throws -> Int {
         try dbQueue.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM entity") ?? 0

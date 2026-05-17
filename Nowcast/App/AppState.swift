@@ -658,6 +658,28 @@ final class AppState: ObservableObject {
         (try? storage.itemsForReport(reportID)) ?? []
     }
 
+    // MARK: - Source reliability (P7-1)
+
+    /// Lazily-computed and cached for ~60s — the full join is expensive
+    /// once the user has hundreds of items, and the popover hits this on
+    /// every hover.
+    private var reliabilityCache: (computedAt: Date, rows: [SourceReliability])?
+
+    func sourceReliability(limit: Int = 50) -> [SourceReliability] {
+        if let cache = reliabilityCache, Date().timeIntervalSince(cache.computedAt) < 60 {
+            return Array(cache.rows.prefix(limit))
+        }
+        let rows = (try? storage.sourceReliability(limit: 500)) ?? []
+        reliabilityCache = (Date(), rows)
+        return Array(rows.prefix(limit))
+    }
+
+    /// Convenience for the popover badge — fast lookup by host.
+    func reliability(for host: String) -> SourceReliability? {
+        let normalized = host.lowercased().replacingOccurrences(of: "www.", with: "")
+        return sourceReliability(limit: 500).first { $0.host == normalized }
+    }
+
     // MARK: - Follow-up suggestions (P6-4)
 
     func suggestFollowUps(for report: Report,

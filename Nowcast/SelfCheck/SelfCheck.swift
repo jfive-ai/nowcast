@@ -215,6 +215,14 @@ enum SelfCheck {
         let sawDone = stages.contains { if case .done = $0 { return true } else { return false } }
         check("P5-5: terminal .done event fired", sawDone)
 
+        // P7-1: source reliability formula band sanity.
+        check("P7-1: all-thumbs-up host scores ≥70",
+              SourceReliability.formula(mentions: 5, thumbsUp: 5, thumbsDown: 0, hallucinations: 0) >= 70)
+        check("P7-1: all-hallucinations host scores <40",
+              SourceReliability.formula(mentions: 5, thumbsUp: 0, thumbsDown: 0, hallucinations: 5) < 40)
+        check("P7-1: neutral host lands in mixed band",
+              (40...69).contains(SourceReliability.formula(mentions: 5, thumbsUp: 0, thumbsDown: 0, hallucinations: 0)))
+
         // P6-4: follow-up suggester returns ≥1 candidate with both fields filled.
         let followUpSuggester = FollowUpSuggester(llm: MockLLMClient())
         let followUps = await followUpSuggester.suggest(
