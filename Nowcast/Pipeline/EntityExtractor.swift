@@ -27,13 +27,17 @@ final class EntityExtractor {
                 storage: StorageManager) async {
         let extracted = await extract(briefing: briefing)
         guard !extracted.isEmpty else { return }
+        // FIX (codex review PR #67 P2): `saveBriefing` stores cluster.id
+        // as `"<reportID>:<briefingClusterID>"` so foreign joins succeed.
+        // Apply the same prefix here so entity_mention.cluster_id matches.
         for hit in extracted {
             do {
                 let entityID = try storage.upsertEntity(name: hit.name, kind: hit.kind)
+                let scopedClusterID = hit.clusterID.map { "\(reportID.uuidString):\($0)" }
                 try storage.recordEntityMention(
                     entityID: entityID,
                     reportID: reportID,
-                    clusterID: hit.clusterID
+                    clusterID: scopedClusterID
                 )
             } catch {
                 // Mention persistence failure is non-fatal for the report.
