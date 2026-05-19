@@ -42,7 +42,7 @@ final class FollowUpSuggester {
         Rules:
         - Each `query` must be at least one word different from "\(report.topic)" and from every other suggestion.
         - Each must be a topic, not a question.
-        - Pick at most 3 sources from this set: hackerNews, reddit, rss, news, youtubeSearch, braveSearch, nitter.
+        - Pick at most 3 sources from this set: hackerNews, reddit, rss, news, youtubeSearch, web, xNitter.
         - Don't duplicate any of the user's existing preset names:
         \(avoid)
 
@@ -83,8 +83,22 @@ final class FollowUpSuggester {
             let suggestions: [Hit]
         }
         let decoded = (try? JSONDecoder().decode(Envelope.self, from: data)) ?? Envelope(suggestions: [])
+        // FIX (codex review PR #70 P2): tolerate the LLM emitting either
+        // `braveSearch`/`nitter` (the prompt's old labels) or the actual
+        // SourceKind raw values (`web`/`xNitter`). Map common aliases so
+        // suggestions don't silently fall back to .hackerNews.
+        let aliases: [String: SourceKind] = [
+            "bravesearch": .web,
+            "brave": .web,
+            "nitter": .xNitter,
+            "x": .xNitter,
+            "twitter": .xNitter,
+        ]
         return decoded.suggestions.prefix(3).map { hit in
-            let sources = (hit.sources ?? []).compactMap { SourceKind(rawValue: $0) }
+            let sources = (hit.sources ?? []).compactMap { raw -> SourceKind? in
+                if let exact = SourceKind(rawValue: raw) { return exact }
+                return aliases[raw.lowercased()]
+            }
             return Suggestion(
                 name: hit.name.trimmingCharacters(in: .whitespacesAndNewlines),
                 query: hit.query.trimmingCharacters(in: .whitespacesAndNewlines),

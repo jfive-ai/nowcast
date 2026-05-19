@@ -99,14 +99,22 @@ struct ReportView: View {
             followUps = []
             let tldr = Self.extractTLDR(from: markdown)
             let headlines = clusters.map(\.headline)
-            let reportRef = report
+            let targetReportID = report.id
+            // FIX (codex review PR #70 P1): the previous stale-result
+            // check compared `reportRef.id == report.id` where both
+            // came from the same `.task(id:)` capture and were therefore
+            // always equal. After navigating from report A to report B,
+            // A's slow LLM response could land later and overwrite B's
+            // followUps. We now compare the captured `targetReportID`
+            // against the *live* selection in state — only assign when
+            // they still match.
             Task { @MainActor in
                 let sugs = await state.suggestFollowUps(
-                    for: reportRef,
+                    for: report,
                     tldr: tldr,
                     clusterHeadlines: headlines
                 )
-                if reportRef.id == report.id {
+                if state.selectedReportID == targetReportID {
                     followUps = sugs
                 }
             }
