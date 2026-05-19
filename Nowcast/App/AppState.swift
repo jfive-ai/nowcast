@@ -257,6 +257,12 @@ final class AppState: ObservableObject {
         )
         try? storage.updatePresetLastRun(id: preset.id, at: Date())
         loadPresets()
+
+        // FIX (codex review PR #61 P2): check for due weekly digests
+        // after every preset run, not only at app startup. In long-lived
+        // sessions (the user keeps the app open), a weekly digest that
+        // becomes due mid-week wouldn't auto-synthesize until restart.
+        await runDueWeeklyDigests()
     }
 
     private func runPipeline(topic: String,
