@@ -11,6 +11,7 @@ final class ReportPipeline {
     private let queryRewritingEnabled: Bool
     private let contradictionDetectionEnabled: Bool
     private let entityExtractionEnabled: Bool
+    private let counterpointsEnabled: Bool
 
     /// One adapter fetch's outcome. Hoisted to a private nested type so
     /// `recordSourceRuns(...)` can be a regular method.
@@ -29,7 +30,8 @@ final class ReportPipeline {
          model: String? = nil,
          queryRewritingEnabled: Bool = false,
          contradictionDetectionEnabled: Bool = false,
-         entityExtractionEnabled: Bool = false) {
+         entityExtractionEnabled: Bool = false,
+         counterpointsEnabled: Bool = false) {
         var map: [SourceKind: SourceAdapter] = [:]
         for adapter in adapters { map[adapter.kind] = adapter }
         self.adapters = map
@@ -39,6 +41,7 @@ final class ReportPipeline {
         self.queryRewritingEnabled = queryRewritingEnabled
         self.contradictionDetectionEnabled = contradictionDetectionEnabled
         self.entityExtractionEnabled = entityExtractionEnabled
+        self.counterpointsEnabled = counterpointsEnabled
     }
 
     /// Generate a report. Throws if no items are found at all (caller decides
@@ -179,8 +182,20 @@ final class ReportPipeline {
         //     model didn't emit one, or it failed to parse, gracefully fall
         //     back to the visible markdown so the user still gets a brief.
         let extracted = BriefingExtractor.extract(from: response.text)
-        let validatedResult: BriefingResult? = extracted.result.map {
+        var validatedResult: BriefingResult? = extracted.result.map {
             CitationValidator.filter($0, againstInputs: fresh)
+        }
+
+        // 3b.1 Optional counterpoint pass (P5-3). Mutates `validatedResult`
+        //      in place so the new counterpoint/gap fields land in the DB
+        //      and a rendered markdown section can be appended below.
+        if counterpointsEnabled,
+           let current = validatedResult, !current.clusters.isEmpty {
+            let agent = CounterpointAgent(llm: llm, model: model)
+            validatedResult = await agent.annotate(current, items: fresh)
+        }
+        let counterpointSection: String? = validatedResult.flatMap {
+            CounterpointAgent.renderMarkdownSection(for: $0)
         }
 
         // 3c. If we have structured clusters, compute the diff against the
@@ -232,7 +247,8 @@ final class ReportPipeline {
             : extracted.markdown
         let diffPrefix = diffSection.map { $0 + "\n\n" } ?? ""
         let contradictionPrefix = contradictionSection.map { $0 + "\n\n" } ?? ""
-        let markdown = header + "\n\n" + contradictionPrefix + diffPrefix + visibleBody
+        let counterpointSuffix = counterpointSection ?? ""
+        let markdown = header + "\n\n" + contradictionPrefix + diffPrefix + visibleBody + counterpointSuffix
 
         // FIX (codex review PRs #35/#45/#46): roll auxiliary LLM calls
         // (query rewriter, contradiction detector) into the report's
