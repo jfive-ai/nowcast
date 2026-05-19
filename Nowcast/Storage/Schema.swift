@@ -190,6 +190,23 @@ enum Schema {
                 """)
         }
 
+        // v9: per-report conversation thread (P5-1). One row per turn,
+        // ordered by created_at. Cascade-delete with the parent report.
+        m.registerMigration("v9") { db in
+            try db.create(table: "conversation_message") { t in
+                t.column("id", .text).primaryKey()
+                t.column("report_id", .text)
+                    .notNull()
+                    .references("report", onDelete: .cascade)
+                t.column("role", .text).notNull()
+                t.column("text", .text).notNull()
+                t.column("citations_json", .text).notNull().defaults(to: "[]")
+                t.column("created_at", .datetime).notNull()
+            }
+            try db.create(indexOn: "conversation_message",
+                          columns: ["report_id", "created_at"])
+        }
+
         return m
     }
 
