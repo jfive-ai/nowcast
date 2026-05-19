@@ -36,6 +36,14 @@ struct ContentView: View {
                 placeholder
             }
         }
+        .overlay(alignment: .topTrailing) {
+            if let gen = state.generation {
+                ProgressTimelineView(state: gen)
+                    .padding(16)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(duration: 0.25), value: state.generation?.history.count)
         .alert(
             "Something went wrong",
             isPresented: Binding(
