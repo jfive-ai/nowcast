@@ -707,8 +707,13 @@ final class AppState: ObservableObject {
 
     /// Looks up the chronologically-prior report on the same topic/preset.
     /// Convenience for the "Compare with prior" shortcut.
+    /// FIX (codex review PR #69 P2): bypass the default candidate cap so
+    /// the lookup can find the immediately-prior report even on topics
+    /// that have many newer entries. The cap is intended for the
+    /// compare-picker UI, not for the prior-finder.
     func priorReport(for report: Report) -> Report? {
-        candidateReportsForCompare(report).first { $0.generatedAt < report.generatedAt }
+        candidateReportsForCompare(report, limit: .max)
+            .first { $0.generatedAt < report.generatedAt }
     }
 
     /// In-app navigation target for the compare view.
