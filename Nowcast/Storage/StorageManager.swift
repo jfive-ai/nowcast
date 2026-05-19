@@ -902,6 +902,14 @@ final class StorageManager {
 
     /// Upserts an entity by (canonical_name, kind). Returns the row's id —
     /// either the freshly-inserted one or the existing one.
+    /// FIX (codex review PRs #56/#67 P1): the `mention_count` counter is
+    /// kept in sync with the actual `entity_mention` table via a single
+    /// transactional path. Callers no longer call upsertEntity +
+    /// recordEntityMention separately for counting — they call
+    /// `recordEntity(name:kind:reportID:clusterID:)` below, which inserts
+    /// the mention with `INSERT OR IGNORE` and only bumps `mention_count`
+    /// when the insert actually affects a row. Prevents counter drift on
+    /// re-runs / backfills.
     @discardableResult
     func upsertEntity(name: String, kind: Entity.Kind, at date: Date = Date()) throws -> UUID {
         try dbQueue.write { db in
@@ -910,18 +918,23 @@ final class StorageManager {
                 WHERE canonical_name = ? AND kind = ?
                 LIMIT 1
                 """, arguments: [name, kind.rawValue]) {
+                // Only update last_seen_at here. The mention_count is
+                // updated below from recordEntity / recordEntityMention
+                // when a new mention row is *actually inserted*.
                 try db.execute(sql: """
                     UPDATE entity
-                    SET last_seen_at = ?, mention_count = mention_count + 1
+                    SET last_seen_at = ?
                     WHERE id = ?
                     """, arguments: [date, existingID])
                 return UUID(uuidString: existingID) ?? UUID()
             } else {
                 let newID = UUID()
+                // New entity: mention_count starts at 0; the caller will
+                // bump it via recordEntityMention.
                 try db.execute(sql: """
                     INSERT INTO entity
                       (id, canonical_name, kind, first_seen_at, last_seen_at, mention_count)
-                    VALUES (?, ?, ?, ?, ?, 1)
+                    VALUES (?, ?, ?, ?, ?, 0)
                     """, arguments: [
                         newID.uuidString,
                         name,
@@ -937,6 +950,11 @@ final class StorageManager {
     /// Inserts a mention row. `INSERT OR IGNORE` because the natural key
     /// (entity, report, cluster) is the primary key — a duplicate just
     /// no-ops, which is exactly what we want when the extractor runs twice.
+    /// FIX (codex review PRs #56/#67 P1): increment `mention_count` only
+    /// when the INSERT actually affected a row (i.e. this is a genuinely
+    /// new (entity, report, cluster) tuple), via `changes()` inside the
+    /// same write transaction. Prevents the counter from drifting above
+    /// the real mention count when extraction re-runs.
     func recordEntityMention(entityID: UUID, reportID: UUID, clusterID: String?) throws {
         try dbQueue.write { db in
             try db.execute(sql: """
@@ -947,6 +965,15 @@ final class StorageManager {
                     reportID.uuidString,
                     clusterID ?? "",
                 ])
+            // SQLite's `changes()` returns 1 when the INSERT actually
+            // wrote a row, 0 when OR IGNORE skipped it.
+            if let inserted: Int = try Int.fetchOne(db, sql: "SELECT changes()"),
+               inserted > 0 {
+                try db.execute(sql: """
+                    UPDATE entity SET mention_count = mention_count + 1
+                    WHERE id = ?
+                    """, arguments: [entityID.uuidString])
+            }
         }
     }
 
