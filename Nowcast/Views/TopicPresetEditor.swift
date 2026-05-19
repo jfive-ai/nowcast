@@ -24,6 +24,7 @@ struct TopicPresetEditor: View {
     @State private var deliveryWebhookURL: String
     @State private var deliveryWebhookFormat: WebhookFormat
     @State private var webhookTestStatus: String?
+    @State private var weeklyDigestEnabled: Bool
 
     init(preset: TopicPreset?, onSave: @escaping (TopicPreset) -> Void) {
         self.original = preset
@@ -69,6 +70,7 @@ struct TopicPresetEditor: View {
         _deliveryWebhookURL = State(initialValue: existingWebhook?.url ?? "")
         _deliveryWebhookFormat = State(initialValue: existingWebhook?.format ?? .generic)
         _webhookTestStatus = State(initialValue: nil)
+        _weeklyDigestEnabled = State(initialValue: preset?.weeklyDigestEnabled ?? false)
     }
 
     var body: some View {
@@ -165,6 +167,25 @@ struct TopicPresetEditor: View {
                     Text("Reports always appear in History.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+
+                Section("Weekly digest") {
+                    Toggle("Auto-synthesize once per week", isOn: $weeklyDigestEnabled)
+                    Text("Combines the past 7 days of daily briefs into a meta-brief with storylines, what changed, and what to watch next week.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if let original {
+                        HStack {
+                            Button("Run weekly digest now") {
+                                Task { await state.runWeeklyDigestNow(for: original) }
+                            }
+                            if let last = original.lastWeeklyAt {
+                                Text("Last: \(last.formatted(date: .abbreviated, time: .shortened))")
+                                    .font(.caption).foregroundStyle(.secondary)
+                            } else {
+                                Text("Never run").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                    }
                 }
 
                 if !isValid {
@@ -276,6 +297,16 @@ struct TopicPresetEditor: View {
 
         let orderedSources = SourceKind.allCases.filter { sources.contains($0) }
 
+        // FIX (codex review PR #61 P1): re-read the preset from AppState
+        // before reconstructing it, so that a click on "Run weekly digest
+        // now" that updated `last_weekly_at` between edit-open and Save
+        // isn't clobbered by the stale `original` snapshot. The same
+        // applies to `lastRunAt`, which the background scheduler may
+        // update concurrently.
+        let fresh = original.flatMap { o in state.presets.first(where: { $0.id == o.id }) }
+        let liveLastRunAt = fresh?.lastRunAt ?? original?.lastRunAt
+        let liveLastWeeklyAt = fresh?.lastWeeklyAt ?? original?.lastWeeklyAt
+
         return TopicPreset(
             id: original?.id ?? UUID(),
             name: name.trimmingCharacters(in: .whitespaces),
@@ -285,7 +316,9 @@ struct TopicPresetEditor: View {
             cadence: cadence,
             deliveryChannels: channels,
             createdAt: original?.createdAt ?? Date(),
-            lastRunAt: original?.lastRunAt
+            lastRunAt: liveLastRunAt,
+            weeklyDigestEnabled: weeklyDigestEnabled,
+            lastWeeklyAt: liveLastWeeklyAt
         )
     }
 
