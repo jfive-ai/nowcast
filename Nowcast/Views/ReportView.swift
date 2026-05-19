@@ -72,6 +72,17 @@ struct ReportView: View {
             clusterFeedbackKinds = byCluster
             chatHolder.bind(report: report, state: state)
         }
+        // FIX (codex review PR #55 P2): if session is nil because the
+        // user had no LLM key at first task fire, re-attempt the bind
+        // whenever the user opens the chat drawer OR when key/provider
+        // state changes downstream. Cheap: bind() short-circuits when
+        // a valid session already exists for this report.
+        .onChange(of: chatOpen) { newValue in
+            if newValue { chatHolder.bind(report: report, state: state) }
+        }
+        .onReceive(state.$openAIAPIKey) { _ in chatHolder.bind(report: report, state: state) }
+        .onReceive(state.$anthropicAPIKey) { _ in chatHolder.bind(report: report, state: state) }
+        .onReceive(state.$llmProvider) { _ in chatHolder.bind(report: report, state: state) }
         .toolbar {
             ToolbarItemGroup(placement: .primaryAction) {
                 audioButton
@@ -113,7 +124,14 @@ struct ReportView: View {
     final class ChatSessionHolder: ObservableObject {
         @Published var session: BriefChatSession?
         func bind(report: Report, state: AppState) {
-            if let existing = session, existing.report.id == report.id { return }
+            // FIX (codex review PR #55 P2): only short-circuit when we
+            // ALREADY have a valid session for this report. If session
+            // is nil (e.g. user fixed their API key after first load),
+            // retry the makeBriefChatSession call so the chat drawer
+            // becomes usable without forcing the user to navigate away.
+            if let existing = session, existing.report.id == report.id {
+                return
+            }
             session = state.makeBriefChatSession(for: report)
         }
     }
