@@ -12,6 +12,7 @@ struct ContentView: View {
                 Picker("", selection: $state.sidebarSelection) {
                     Text("History").tag(AppState.SidebarSection.history)
                     Text("Search").tag(AppState.SidebarSection.search)
+                    Text("Entities").tag(AppState.SidebarSection.entities)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
@@ -21,6 +22,8 @@ struct ContentView: View {
                     HistoryView(selectedReport: selectionBinding)
                 case .search:
                     SearchView()
+                case .entities:
+                    EntitiesView(selectedReport: selectionBinding)
                 }
             }
             .frame(minWidth: 280)

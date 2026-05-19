@@ -82,15 +82,25 @@ struct MockLLMClient: LLMClient {
     {"pairs": []}
     """
 
+    static let cannedEntitiesEnvelope: String = """
+    {"entities": [
+      {"name": "Ethereum", "kind": "project", "cluster": "c1"},
+      {"name": "Vitalik Buterin", "kind": "person", "cluster": "c1"},
+      {"name": "EigenLayer", "kind": "project", "cluster": "c2"}
+    ]}
+    """
+
     func summarize(prompt: String, model: String?) async throws -> LLMResponse {
-        // Heuristic routing: the rewriter, contradiction detector, and
-        // briefing prompt are distinct enough that we can pick the right
-        // canned response by sniffing the prompt.
+        // Heuristic routing: the rewriter, contradiction detector, entity
+        // extractor, and briefing prompt are distinct enough that we can
+        // pick the right canned response by sniffing the prompt.
         let text: String
         if prompt.contains("`subQueries`") {
             text = Self.cannedSubQueriesEnvelope
         } else if prompt.contains("disagreeing pairs") || prompt.contains("`pairs`") {
             text = Self.cannedContradictionEnvelope
+        } else if prompt.contains("Extract a flat list of named entities") {
+            text = Self.cannedEntitiesEnvelope
         } else {
             text = Self.cannedBrief
         }
