@@ -1052,6 +1052,111 @@ final class StorageManager {
         }
     }
 
+    // MARK: - Source reliability (P7-1)
+
+    /// Per-host reliability rows. Joins items → report_item → cluster →
+    /// feedback to count thumbs-up / thumbs-down / hallucinations against
+    /// the clusters where each host's items appeared.
+    func sourceReliability(limit: Int = 50) throws -> [SourceReliability] {
+        struct Row: Hashable {
+            var mentions = 0
+            var thumbsUp = 0
+            var thumbsDown = 0
+            var hallucinations = 0
+        }
+        var byHost: [String: Row] = [:]
+
+        // FIX (codex review PR #76 P1): the previous SQL did a cartesian
+        // join (`LEFT JOIN cluster ON c.report_id = ri.report_id`) which
+        // paired every item with every cluster in the report, regardless
+        // of whether the item was actually cited by that cluster. That
+        // inflated `mentions` by cluster count and attributed cluster
+        // feedback to every host in the report. We now resolve the
+        // item→cluster edge by checking whether the item's canonical URL
+        // appears in the cluster's citations_json array — done in Swift
+        // for robustness across SQLite JSON1 availability.
+        try dbQueue.read { db in
+            // 1. Materialize per-report items.
+            let itemRows = try GRDB.Row.fetchAll(db, sql: """
+                SELECT ri.report_id AS report_id, i.canonical_url AS url
+                FROM item i
+                JOIN report_item ri ON ri.item_id = i.id
+                """)
+            struct ItemRow { let reportID: String; let url: String; let host: String }
+            let items: [ItemRow] = itemRows.compactMap { row in
+                guard let rid: String = row["report_id"],
+                      let urlString: String = row["url"],
+                      var host = URL(string: urlString)?.host?.lowercased()
+                else { return nil }
+                if host.hasPrefix("www.") { host.removeFirst(4) }
+                return ItemRow(reportID: rid, url: urlString, host: host)
+            }
+
+            // 2. Each item contributes one mention to its host.
+            for item in items {
+                byHost[item.host, default: Row()].mentions += 1
+            }
+
+            // 3. For each cluster, look at its citations_json. For every
+            //    citation that resolves to one of our known item URLs,
+            //    attribute that cluster to the matching host(s). Pull the
+            //    per-cluster feedback once and credit each host the cluster
+            //    actually cited.
+            let clusterRows = try GRDB.Row.fetchAll(db, sql: """
+                SELECT c.id AS cluster_id, c.report_id AS report_id, c.citations_json AS cit
+                FROM cluster c
+                """)
+            // Index canonical-URL strings to host (for the cluster lookup).
+            var hostByCanonicalURL: [String: String] = [:]
+            for item in items { hostByCanonicalURL[item.url] = item.host }
+
+            for row in clusterRows {
+                guard let cid: String = row["cluster_id"],
+                      let citationsJSON: String = row["cit"]
+                else { continue }
+                let urls: [String] = (try? Self.decodeJSON(citationsJSON)) ?? []
+                let hosts = Set(urls.compactMap { hostByCanonicalURL[$0] })
+                guard !hosts.isEmpty else { continue }
+
+                // Pull this cluster's feedback ONCE.
+                let counts = try GRDB.Row.fetchAll(db, sql: """
+                    SELECT kind, COUNT(*) AS n FROM feedback
+                    WHERE target = 'cluster' AND target_id = ?
+                    GROUP BY kind
+                    """, arguments: [cid])
+                for c in counts {
+                    let kind: String = c["kind"] ?? ""
+                    let n: Int = c["n"] ?? 0
+                    for host in hosts {
+                        switch kind {
+                        case "thumbs_up":     byHost[host, default: Row()].thumbsUp += n
+                        case "thumbs_down":   byHost[host, default: Row()].thumbsDown += n
+                        case "hallucination": byHost[host, default: Row()].hallucinations += n
+                        default: break
+                        }
+                    }
+                }
+            }
+        }
+
+        let rows = byHost.map { host, r in
+            SourceReliability(
+                host: host,
+                mentions: r.mentions,
+                thumbsUp: r.thumbsUp,
+                thumbsDown: r.thumbsDown,
+                hallucinations: r.hallucinations,
+                score: SourceReliability.formula(
+                    mentions: r.mentions,
+                    thumbsUp: r.thumbsUp,
+                    thumbsDown: r.thumbsDown,
+                    hallucinations: r.hallucinations
+                )
+            )
+        }
+        return Array(rows.sorted { $0.mentions > $1.mentions }.prefix(limit))
+    }
+
     func entityCount() throws -> Int {
         try dbQueue.read { db in
             try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM entity") ?? 0
