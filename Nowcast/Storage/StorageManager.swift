@@ -492,13 +492,18 @@ final class StorageManager {
                 arguments: [reportID.uuidString]
             )
             for (idx, cluster) in result.clusters.enumerated() {
-                let clusterUUID = UUID()
+                // FIX (codex review PR #67 P2): persist the cluster.id
+                // that the briefing emitted (the same `c1`/`c2`/... that
+                // downstream extractors reference), so entity_mention.
+                // cluster_id can be joined back to cluster.id. We scope
+                // by report so collisions across reports stay safe.
+                let persistedID = "\(reportID.uuidString):\(cluster.id)"
                 let citationsJSON = (try? Self.encodeJSON(cluster.citations)) ?? "[]"
                 try db.execute(sql: """
                     INSERT INTO cluster (id, report_id, headline, summary, ord, citations_json, counterpoint, gap)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """, arguments: [
-                        clusterUUID.uuidString,
+                        persistedID,
                         reportID.uuidString,
                         cluster.headline,
                         cluster.summary,
@@ -514,7 +519,7 @@ final class StorageManager {
                         VALUES (?, ?, ?, ?, ?)
                         """, arguments: [
                             UUID().uuidString,
-                            clusterUUID.uuidString,
+                            persistedID,
                             claim.text,
                             claimCitationsJSON,
                             cidx,

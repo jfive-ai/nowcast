@@ -51,14 +51,18 @@ enum MarkdownLinkText {
         return index
     }
 
-    /// Normalize so chip lookup matches what `URLCanonicalizer` stored on
-    /// the items: drop trailing slash, lowercase. Cheap and good enough
-    /// — when normalization misses, the popover gracefully falls back to
-    /// the generic "not in source set" hint.
+    /// Normalize so chip lookup matches what `URLCanonicalizer.hash` saw
+    /// when the item was persisted. We use the same canonicalization
+    /// pipeline so chips for `www.` / utm_*-bearing / fragment-bearing
+    /// citation variants still resolve.
+    ///
+    /// FIX (codex review PRs #67/#68 P2): the previous "drop trailing
+    /// slash + lowercase" was much weaker than `URLCanonicalizer`'s
+    /// host-prefix / tracker-param / fragment stripping. Any citation
+    /// that passed validation upstream could miss this lookup and the
+    /// hover popover would falsely report "not in source set".
     static func normalize(_ urlString: String) -> String {
         guard let url = URL(string: urlString) else { return urlString.lowercased() }
-        var stripped = url.absoluteString
-        if stripped.hasSuffix("/") { stripped.removeLast() }
-        return stripped.lowercased()
+        return URLCanonicalizer.canonicalize(url).absoluteString
     }
 }
