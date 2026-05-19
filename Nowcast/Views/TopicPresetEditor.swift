@@ -258,9 +258,20 @@ struct TopicPresetEditor: View {
         var channels: [DeliveryChannel] = [.inApp]
         if deliveryNotification { channels.append(.notification) }
         if deliveryMenuBar { channels.append(.menuBar) }
-        let trimmedURL = deliveryWebhookURL.trimmingCharacters(in: .whitespacesAndNewlines)
-        if deliveryWebhookEnabled, !trimmedURL.isEmpty {
-            channels.append(.webhook(WebhookConfig(url: trimmedURL, format: deliveryWebhookFormat)))
+        // FIX (codex review PR #59 P2): preserve ALL existing webhook
+        // channels that aren't the one the user is editing via the
+        // single editor form. Save would otherwise silently drop every
+        // webhook past the first when the preset originally fanned out
+        // to multiple destinations.
+        let editedURL = deliveryWebhookURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let existingWebhooks = (original?.deliveryChannels ?? []).compactMap(\.webhookConfig)
+        // The first existing webhook is the one bound to this form;
+        // everything past index 0 is fan-out we must preserve verbatim.
+        for extra in existingWebhooks.dropFirst() {
+            channels.append(.webhook(extra))
+        }
+        if deliveryWebhookEnabled, !editedURL.isEmpty {
+            channels.append(.webhook(WebhookConfig(url: editedURL, format: deliveryWebhookFormat)))
         }
 
         let orderedSources = SourceKind.allCases.filter { sources.contains($0) }
