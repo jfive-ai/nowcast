@@ -349,6 +349,21 @@ final class ReportPipeline {
         let storedItems = (try? storage.itemsForReport(stored.id)) ?? []
         try? storage.indexItemsForSearch(storedItems)
 
+        // 7c. Embed for semantic search (P8-1). Best effort — semantic
+        //     search is a secondary surface; if the OS embedder is absent
+        //     or vector computation fails, we silently skip and rely on
+        //     keyword/FTS. Runs on the calling task, costing a handful of
+        //     ms of CPU — small relative to LLM + network already in the
+        //     critical path.
+        let indexText = ReportEmbedder.makeIndexText(
+            topic: topic,
+            title: smartTitle,
+            markdown: markdown
+        )
+        if let vector = ReportEmbedder.shared.embed(indexText) {
+            try? storage.saveEmbedding(reportID: stored.id, vector: vector)
+        }
+
         // 8. Record per-adapter outcomes for the source health panel.
         // FIX (codex review PR #30): per-source freshCount now uses the
         // adapter's *own* contribution to the dedup'd set, not the

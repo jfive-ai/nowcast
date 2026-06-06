@@ -725,6 +725,63 @@ final class StorageManager {
         return tokens.map { "\"\($0)\"" }.joined(separator: " AND ")
     }
 
+    // MARK: - Embeddings (v14, P8-1)
+
+    /// Persist a per-report sentence embedding as a Float32 LE BLOB.
+    /// Idempotent — overwrites any prior vector for the same report.
+    func saveEmbedding(reportID: UUID, vector: [Float]) throws {
+        let blob = ReportEmbedder.encode(vector)
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE report SET embedding = ? WHERE id = ?",
+                arguments: [blob, reportID.uuidString]
+            )
+        }
+    }
+
+    /// (reportID, vector) for every report that has a stored embedding.
+    /// Used by semantic search at query time (in-memory cosine scan).
+    func allEmbeddings() throws -> [(reportID: UUID, vector: [Float])] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT id, embedding FROM report
+                WHERE embedding IS NOT NULL
+                """).compactMap { row -> (UUID, [Float])? in
+                    guard let idString: String = row["id"],
+                          let id = UUID(uuidString: idString),
+                          let blob: Data = row["embedding"],
+                          let vector = ReportEmbedder.decode(blob)
+                    else { return nil }
+                    return (id, vector)
+                }
+        }
+    }
+
+    /// Report rows that need an embedding — used by the launch-time
+    /// backfill so historical briefs become semantically searchable on
+    /// the next launch after upgrade. Returns the markdown path so the
+    /// caller can read the body outside the read transaction.
+    struct EmbeddingBackfillRow { let id: UUID; let topic: String; let title: String?; let markdownPath: String }
+
+    func reportsMissingEmbedding(limit: Int = 500) throws -> [EmbeddingBackfillRow] {
+        try dbQueue.read { db in
+            try Row.fetchAll(db, sql: """
+                SELECT id, topic, title, markdown_path FROM report
+                WHERE embedding IS NULL
+                ORDER BY generated_at DESC
+                LIMIT ?
+                """, arguments: [limit]).compactMap { row -> EmbeddingBackfillRow? in
+                    guard let idString: String = row["id"],
+                          let id = UUID(uuidString: idString),
+                          let topic: String = row["topic"],
+                          let path: String = row["markdown_path"]
+                    else { return nil }
+                    let title: String? = row["title"]
+                    return EmbeddingBackfillRow(id: id, topic: topic, title: title, markdownPath: path)
+                }
+        }
+    }
+
     // MARK: - Source runs / health (v7)
 
     func recordSourceRun(_ run: SourceRun) throws {
