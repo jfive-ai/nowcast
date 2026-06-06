@@ -19,6 +19,7 @@ struct ReportView: View {
     @State private var provenanceRows: [ProvenanceBuilder.ClusterRows] = []
     @State private var followUps: [FollowUpSuggester.Suggestion] = []
     @State private var presetDraft: TopicPreset?
+    @State private var sentimentTrendOpen: Bool = false
 
     var body: some View {
         HSplitView {
@@ -29,6 +30,10 @@ struct ReportView: View {
 
                     if state.isBigStory(report) {
                         bigStoryBanner
+                    }
+
+                    if report.sentiment != nil {
+                        sentimentIndicator
                     }
 
                     HStack(spacing: 6) {
@@ -126,6 +131,17 @@ struct ReportView: View {
         .sheet(item: $presetDraft) { draft in
             TopicPresetEditor(preset: draft) { saved in
                 state.savePreset(saved)
+            }
+        }
+        .sheet(isPresented: $sentimentTrendOpen) {
+            SentimentTrendView(
+                presetName: presetName(for: report) ?? report.topic,
+                reports: state.reports.filter { $0.presetID == report.presetID }
+            )
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { sentimentTrendOpen = false }
+                }
             }
         }
         // FIX (codex review PR #55 P2): if session is nil because the
@@ -241,6 +257,11 @@ struct ReportView: View {
     }
 
     // MARK: - Audio
+
+    private func presetName(for report: Report) -> String? {
+        guard let pid = report.presetID else { return nil }
+        return state.presets.first(where: { $0.id == pid })?.name
+    }
 
     @ViewBuilder
     private var audioButton: some View {
@@ -434,6 +455,46 @@ struct ReportView: View {
             parts.append(cost < 0.01 ? "~<$0.01" : String(format: "~$%.3f", cost))
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private var sentimentIndicator: some View {
+        let sentiment = report.sentiment ?? 0
+        let pct = (sentiment + 1) / 2  // map -1..1 → 0..1
+        let label: String = {
+            if sentiment > 0.25 { return "Bullish" }
+            if sentiment < -0.25 { return "Bearish" }
+            return "Neutral"
+        }()
+        let color: Color = sentiment > 0.25 ? .green : (sentiment < -0.25 ? .red : .secondary)
+        return HStack(spacing: 10) {
+            Text("Coverage tone").font(.caption).foregroundStyle(.secondary)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.gray.opacity(0.18)).frame(height: 4)
+                    Circle()
+                        .fill(color)
+                        .frame(width: 8, height: 8)
+                        .offset(x: max(0, min(geo.size.width - 8, geo.size.width * pct - 4)))
+                }
+            }
+            .frame(height: 8)
+            Text(label)
+                .font(.caption.bold())
+                .foregroundStyle(color)
+                .frame(width: 60, alignment: .leading)
+            if report.presetID != nil {
+                Button {
+                    sentimentTrendOpen = true
+                } label: {
+                    Label("Trend", systemImage: "chart.line.uptrend.xyaxis")
+                        .labelStyle(.iconOnly)
+                        .font(.caption)
+                }
+                .buttonStyle(.borderless)
+                .help("Show sentiment trend for this preset")
+            }
+        }
+        .help(report.sentimentRationale ?? label)
     }
 
     private var bigStoryBanner: some View {

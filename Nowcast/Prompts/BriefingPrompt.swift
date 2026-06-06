@@ -78,7 +78,9 @@ enum BriefingPrompt {
             }
           ],
           "signal": "...",
-          "low_confidence": false
+          "low_confidence": false,
+          "sentiment": 0.0,
+          "sentiment_rationale": "..."
         }
         ```
 
@@ -86,6 +88,8 @@ enum BriefingPrompt {
         - Every URL in `citations` MUST appear in the inputs above. Do not invent URLs.
         - `clusters` must correspond 1-to-1 with the Stories section.
         - `low_confidence` is `true` only if the inputs are too thin to support a real signal.
+        - `sentiment` is your read of the *overall tone of the coverage* in [-1.0, +1.0]: negative for bearish/critical/alarmed, neutral for mixed/procedural, positive for bullish/optimistic. Do NOT report your own opinion — report the coverage's tone.
+        - `sentiment_rationale` is one short sentence (≤120 chars) naming the specific signal that drove that number.
         - The JSON must be valid (no trailing commas, no comments inside the block).
         """
     }

@@ -320,7 +320,9 @@ final class ReportPipeline {
             providerUsed: llm.providerName,
             title: smartTitle,
             bigStoryScore: bigStory.score > 0 ? bigStory.score : nil,
-            bigStoryHeadline: bigStory.headline
+            bigStoryHeadline: bigStory.headline,
+            sentiment: validatedResult?.sentiment,
+            sentimentRationale: validatedResult?.sentimentRationale
         )
         let stored = try storage.insertReport(draft, markdown: markdown)
 

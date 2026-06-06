@@ -9,6 +9,13 @@ struct BriefingResult: Codable, Equatable {
     var clusters: [Cluster]
     let signal: String
     let lowConfidence: Bool
+    /// P8-3: overall tone of the *coverage* in [-1.0, +1.0]. Negative =
+    /// bearish/critical/alarmed; neutral = mixed/procedural; positive =
+    /// bullish/optimistic. Nil for legacy responses where the model
+    /// omitted the field — UI just skips that data point.
+    var sentiment: Double?
+    /// P8-3: one-sentence "why this number" for tooltips on the trend chart.
+    var sentimentRationale: String?
 
     struct Cluster: Codable, Equatable, Identifiable {
         let id: String
@@ -46,6 +53,40 @@ struct BriefingResult: Codable, Equatable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case tldr, clusters, signal, lowConfidence = "low_confidence"
+        case tldr, clusters, signal
+        case lowConfidence = "low_confidence"
+        case sentiment
+        case sentimentRationale = "sentiment_rationale"
+    }
+
+    init(tldr: [String],
+         clusters: [Cluster],
+         signal: String,
+         lowConfidence: Bool,
+         sentiment: Double? = nil,
+         sentimentRationale: String? = nil) {
+        self.tldr = tldr
+        self.clusters = clusters
+        self.signal = signal
+        self.lowConfidence = lowConfidence
+        self.sentiment = Self.clamp(sentiment)
+        self.sentimentRationale = sentimentRationale
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.tldr = try c.decode([String].self, forKey: .tldr)
+        self.clusters = try c.decode([Cluster].self, forKey: .clusters)
+        self.signal = try c.decode(String.self, forKey: .signal)
+        self.lowConfidence = try c.decode(Bool.self, forKey: .lowConfidence)
+        let rawSentiment = try c.decodeIfPresent(Double.self, forKey: .sentiment)
+        self.sentiment = Self.clamp(rawSentiment)
+        self.sentimentRationale = try c.decodeIfPresent(String.self, forKey: .sentimentRationale)
+    }
+
+    /// Pin LLM-reported sentiment to [-1, +1] — defensive against models
+    /// that occasionally drift to 5 or 100 instead of 0.5.
+    private static func clamp(_ value: Double?) -> Double? {
+        value.map { max(-1, min(1, $0)) }
     }
 }

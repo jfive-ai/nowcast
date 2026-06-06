@@ -35,7 +35,9 @@ enum CitationValidator {
             tldr: result.tldr,
             clusters: filteredClusters,
             signal: result.signal,
-            lowConfidence: result.lowConfidence || filteredClusters.count < result.clusters.count
+            lowConfidence: result.lowConfidence || filteredClusters.count < result.clusters.count,
+            sentiment: result.sentiment,
+            sentimentRationale: result.sentimentRationale
         )
     }
 

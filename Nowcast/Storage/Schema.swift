@@ -285,6 +285,19 @@ enum Schema {
             }
         }
 
+        // v16: per-brief coverage sentiment in [-1, +1] (P8-3). Both
+        // nullable so legacy briefs stay valid; the trend chart just
+        // skips data points it doesn't have. We deliberately do NOT
+        // backfill — sentiment is a model judgment, not a deterministic
+        // derivative, and burning tokens to score old briefs gives the
+        // user a noisy retro line.
+        m.registerMigration("v16") { db in
+            try db.alter(table: "report") { t in
+                t.add(column: "sentiment", .double)
+                t.add(column: "sentiment_rationale", .text)
+            }
+        }
+
         return m
     }
 

@@ -34,8 +34,8 @@ final class StorageManager {
                     INSERT INTO report
                       (id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
                        prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title,
-                       big_story_score, big_story_headline)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       big_story_score, big_story_headline, sentiment, sentiment_rationale)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, arguments: [
                         report.id.uuidString,
                         report.presetID?.uuidString,
@@ -55,6 +55,8 @@ final class StorageManager {
                         report.title,
                         report.bigStoryScore,
                         report.bigStoryHeadline,
+                        report.sentiment,
+                        report.sentimentRationale,
                     ])
             }
         } catch {
@@ -82,7 +84,9 @@ final class StorageManager {
             kind: report.kind,
             title: report.title,
             bigStoryScore: report.bigStoryScore,
-            bigStoryHeadline: report.bigStoryHeadline
+            bigStoryHeadline: report.bigStoryHeadline,
+            sentiment: report.sentiment,
+            sentimentRationale: report.sentimentRationale
         )
         return stored
     }
@@ -92,7 +96,7 @@ final class StorageManager {
             try Row.fetchAll(db, sql: """
                 SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
                        prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title,
-                       big_story_score, big_story_headline
+                       big_story_score, big_story_headline, sentiment, sentiment_rationale
                 FROM report
                 ORDER BY generated_at DESC
                 """).compactMap(Self.makeReport)
@@ -107,7 +111,7 @@ final class StorageManager {
             try Row.fetchAll(db, sql: """
                 SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
                        prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title,
-                       big_story_score, big_story_headline
+                       big_story_score, big_story_headline, sentiment, sentiment_rationale
                 FROM report
                 WHERE preset_id = ? AND kind = 'daily' AND generated_at >= ?
                 ORDER BY generated_at ASC
@@ -161,7 +165,7 @@ final class StorageManager {
             try Row.fetchAll(db, sql: """
                 SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
                        prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title,
-                       big_story_score, big_story_headline
+                       big_story_score, big_story_headline, sentiment, sentiment_rationale
                 FROM report
                 ORDER BY generated_at ASC
                 LIMIT ?
@@ -178,7 +182,7 @@ final class StorageManager {
             try Row.fetchAll(db, sql: """
                 SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
                        prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title,
-                       big_story_score, big_story_headline
+                       big_story_score, big_story_headline, sentiment, sentiment_rationale
                 FROM report
                 WHERE generated_at < ?
                 """, arguments: [cutoff]).compactMap(Self.makeReport)
@@ -1367,6 +1371,8 @@ final class StorageManager {
         let title: String? = row["title"]
         let bigStoryScore: Double? = row["big_story_score"]
         let bigStoryHeadline: String? = row["big_story_headline"]
+        let sentiment: Double? = row["sentiment"]
+        let sentimentRationale: String? = row["sentiment_rationale"]
 
         return Report(
             id: id,
@@ -1386,7 +1392,9 @@ final class StorageManager {
             kind: kind,
             title: title,
             bigStoryScore: bigStoryScore,
-            bigStoryHeadline: bigStoryHeadline
+            bigStoryHeadline: bigStoryHeadline,
+            sentiment: sentiment,
+            sentimentRationale: sentimentRationale
         )
     }
 
