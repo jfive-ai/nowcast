@@ -33,8 +33,9 @@ final class StorageManager {
                 try db.execute(sql: """
                     INSERT INTO report
                       (id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
-                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title,
+                       big_story_score, big_story_headline)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """, arguments: [
                         report.id.uuidString,
                         report.presetID?.uuidString,
@@ -52,6 +53,8 @@ final class StorageManager {
                         report.providerUsed,
                         report.kind.rawValue,
                         report.title,
+                        report.bigStoryScore,
+                        report.bigStoryHeadline,
                     ])
             }
         } catch {
@@ -77,7 +80,9 @@ final class StorageManager {
             modelUsed: report.modelUsed,
             providerUsed: report.providerUsed,
             kind: report.kind,
-            title: report.title
+            title: report.title,
+            bigStoryScore: report.bigStoryScore,
+            bigStoryHeadline: report.bigStoryHeadline
         )
         return stored
     }
@@ -86,7 +91,8 @@ final class StorageManager {
         try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
-                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title,
+                       big_story_score, big_story_headline
                 FROM report
                 ORDER BY generated_at DESC
                 """).compactMap(Self.makeReport)
@@ -100,7 +106,8 @@ final class StorageManager {
         return try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
-                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title,
+                       big_story_score, big_story_headline
                 FROM report
                 WHERE preset_id = ? AND kind = 'daily' AND generated_at >= ?
                 ORDER BY generated_at ASC
@@ -153,7 +160,8 @@ final class StorageManager {
         let oldest = try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
-                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title,
+                       big_story_score, big_story_headline
                 FROM report
                 ORDER BY generated_at ASC
                 LIMIT ?
@@ -169,7 +177,8 @@ final class StorageManager {
         let stale = try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
-                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title,
+                       big_story_score, big_story_headline
                 FROM report
                 WHERE generated_at < ?
                 """, arguments: [cutoff]).compactMap(Self.makeReport)
@@ -782,6 +791,56 @@ final class StorageManager {
         }
     }
 
+    // MARK: - Big story (v15, P8-2)
+
+    /// Overwrite the (score, headline) pair on a report. Used by the
+    /// pipeline at save time and by the launch-time backfill for legacy
+    /// rows that pre-dated the v15 migration.
+    func saveBigStory(reportID: UUID, score: Double, headline: String?) throws {
+        try dbQueue.write { db in
+            try db.execute(
+                sql: "UPDATE report SET big_story_score = ?, big_story_headline = ? WHERE id = ?",
+                arguments: [score, headline, reportID.uuidString]
+            )
+        }
+    }
+
+    /// All scored big-story values for a given preset (or all reports when
+    /// presetID is nil). Used to compute a per-preset percentile threshold
+    /// so a "big story" badge means "unusually big *for this topic*."
+    func bigStoryScores(presetID: UUID?, limit: Int = 50) throws -> [Double] {
+        try dbQueue.read { db in
+            if let presetID {
+                return try Double.fetchAll(db, sql: """
+                    SELECT big_story_score FROM report
+                    WHERE big_story_score IS NOT NULL AND preset_id = ?
+                    ORDER BY generated_at DESC
+                    LIMIT ?
+                    """, arguments: [presetID.uuidString, limit])
+            }
+            return try Double.fetchAll(db, sql: """
+                SELECT big_story_score FROM report
+                WHERE big_story_score IS NOT NULL
+                ORDER BY generated_at DESC
+                LIMIT ?
+                """, arguments: [limit])
+        }
+    }
+
+    /// Reports missing a `big_story_score`. Used by the launch backfill;
+    /// the scorer needs clusters loaded out-of-band so we just return the
+    /// report IDs.
+    func reportIDsMissingBigStory(limit: Int = 500) throws -> [UUID] {
+        try dbQueue.read { db in
+            try String.fetchAll(db, sql: """
+                SELECT id FROM report
+                WHERE big_story_score IS NULL
+                ORDER BY generated_at DESC
+                LIMIT ?
+                """, arguments: [limit]).compactMap(UUID.init(uuidString:))
+        }
+    }
+
     // MARK: - Source runs / health (v7)
 
     func recordSourceRun(_ run: SourceRun) throws {
@@ -1306,6 +1365,8 @@ final class StorageManager {
         let kindRaw: String = row["kind"] ?? "daily"
         let kind = Report.Kind(rawValue: kindRaw) ?? .daily
         let title: String? = row["title"]
+        let bigStoryScore: Double? = row["big_story_score"]
+        let bigStoryHeadline: String? = row["big_story_headline"]
 
         return Report(
             id: id,
@@ -1323,7 +1384,9 @@ final class StorageManager {
             modelUsed: modelUsed,
             providerUsed: providerUsed,
             kind: kind,
-            title: title
+            title: title,
+            bigStoryScore: bigStoryScore,
+            bigStoryHeadline: bigStoryHeadline
         )
     }
 

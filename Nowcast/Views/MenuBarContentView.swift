@@ -57,9 +57,15 @@ struct MenuBarContentView: View {
     }
 
     private var header: some View {
-        HStack {
+        HStack(spacing: 6) {
             Text("Nowcast")
                 .font(.headline)
+            if let latest = state.reports.first, state.isBigStory(latest) {
+                Image(systemName: "flame.fill")
+                    .foregroundStyle(Color.orange)
+                    .font(.caption)
+                    .help(latest.bigStoryHeadline.map { "Big story: \($0)" } ?? "Big story")
+            }
             Spacer()
             if state.unreadCount > 0 {
                 Text("\(state.unreadCount) unread")
