@@ -48,6 +48,12 @@ struct Report: Identifiable, Codable, Hashable {
     /// P8-2: headline of the cluster that drove `bigStoryScore`. Used for
     /// tooltips on the History row and the ReportView banner.
     var bigStoryHeadline: String?
+    /// P8-3: LLM-reported overall tone of the *coverage* in [-1, +1].
+    /// Nil for legacy briefs or providers that omitted the field.
+    var sentiment: Double?
+    /// P8-3: one-line rationale shown on the trend chart hover and the
+    /// in-report sentiment indicator.
+    var sentimentRationale: String?
 
     /// What the UI should show: smart title when present, otherwise topic.
     var displayTitle: String { (title?.isEmpty == false ? title : nil) ?? topic }
@@ -69,7 +75,9 @@ struct Report: Identifiable, Codable, Hashable {
          kind: Kind = .daily,
          title: String? = nil,
          bigStoryScore: Double? = nil,
-         bigStoryHeadline: String? = nil) {
+         bigStoryHeadline: String? = nil,
+         sentiment: Double? = nil,
+         sentimentRationale: String? = nil) {
         self.id = id
         self.presetID = presetID
         self.topic = topic
@@ -88,6 +96,8 @@ struct Report: Identifiable, Codable, Hashable {
         self.title = title
         self.bigStoryScore = bigStoryScore
         self.bigStoryHeadline = bigStoryHeadline
+        self.sentiment = sentiment
+        self.sentimentRationale = sentimentRationale
     }
 
     var isUnread: Bool { readAt == nil }

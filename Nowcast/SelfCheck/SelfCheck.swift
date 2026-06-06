@@ -354,6 +354,35 @@ enum SelfCheck {
             check("P5-6: synthesize threw \(error.localizedDescription)", false)
         }
 
+        // P8-3: BriefingResult clamps sentiment to [-1, +1] and the
+        // decoder accepts a missing sentiment field. Round-trip a JSON
+        // payload with an out-of-range sentiment to confirm.
+        let oosJSON = """
+        {
+          "tldr": ["a"],
+          "clusters": [],
+          "signal": "s",
+          "low_confidence": false,
+          "sentiment": 5.0,
+          "sentiment_rationale": "test"
+        }
+        """
+        if let data = oosJSON.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode(BriefingResult.self, from: data) {
+            check("P8-3: oversize sentiment clamped to +1 (got \(decoded.sentiment ?? -999))",
+                  decoded.sentiment == 1.0)
+            check("P8-3: rationale round-trips", decoded.sentimentRationale == "test")
+        } else {
+            check("P8-3: BriefingResult decode failed for clamp fixture", false)
+        }
+        let missingJSON = """
+        {"tldr":["a"],"clusters":[],"signal":"s","low_confidence":false}
+        """
+        if let data = missingJSON.data(using: .utf8),
+           let decoded = try? JSONDecoder().decode(BriefingResult.self, from: data) {
+            check("P8-3: missing sentiment decodes as nil", decoded.sentiment == nil)
+        }
+
         // P8-2: big-story scorer is deterministic — feed it a synthetic
         // briefing where one cluster has 4 distinct hosts and another has
         // 1, expect a 4 (top max-hosts) score and the multi-host cluster's
