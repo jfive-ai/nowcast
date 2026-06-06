@@ -211,6 +211,11 @@ final class AppState: ObservableObject {
         Task { [weak self] in
             await self?.runDueWeeklyDigests()
         }
+
+        // P8-1: populate semantic-search vectors for any pre-existing
+        // reports that pre-dated the v14 migration. Runs detached so it
+        // never blocks UI; embeddings just appear as they complete.
+        backfillEmbeddingsIfNeeded()
     }
 
     // MARK: - Settings
@@ -406,6 +411,69 @@ final class AppState: ObservableObject {
 
     func searchReports(_ query: String) -> [StorageManager.SearchHit] {
         (try? storage.searchReports(query)) ?? []
+    }
+
+    // MARK: - Semantic search (P8-1)
+
+    struct SemanticHit: Hashable, Identifiable {
+        let reportID: UUID
+        let topic: String
+        let title: String?
+        let generatedAt: Date
+        /// Cosine similarity in [-1, +1]; UI renders this as a 0–100 bar.
+        let score: Double
+        var id: UUID { reportID }
+        var displayTitle: String { (title?.isEmpty == false ? title : nil) ?? topic }
+    }
+
+    /// True when the OS shipped a sentence embedding for the current locale
+    /// build. UI uses this to switch the semantic panel into an empty
+    /// state instead of a "no results" wall.
+    var semanticSearchAvailable: Bool { ReportEmbedder.shared.isAvailable }
+
+    func semanticSearch(_ query: String, limit: Int = 25) -> [SemanticHit] {
+        let cleaned = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !cleaned.isEmpty,
+              let queryVector = ReportEmbedder.shared.embed(cleaned)
+        else { return [] }
+        guard let vectors = try? storage.allEmbeddings(), !vectors.isEmpty else { return [] }
+
+        let reportByID = Dictionary(uniqueKeysWithValues: reports.map { ($0.id, $0) })
+        let scored: [SemanticHit] = vectors.compactMap { entry in
+            guard let report = reportByID[entry.reportID] else { return nil }
+            let score = ReportEmbedder.similarity(queryVector, entry.vector)
+            return SemanticHit(
+                reportID: report.id,
+                topic: report.topic,
+                title: report.title,
+                generatedAt: report.generatedAt,
+                score: score
+            )
+        }
+        return Array(scored.sorted { $0.score > $1.score }.prefix(limit))
+    }
+
+    /// One-shot backfill that runs in the background at launch: for every
+    /// report missing an embedding, embed `topic + title + markdown[:1500]`
+    /// and write the vector back. Batches in groups of 25 to keep the
+    /// transaction load even.
+    func backfillEmbeddingsIfNeeded() {
+        guard ReportEmbedder.shared.isAvailable else { return }
+        Task.detached { [storage] in
+            let pending = (try? storage.reportsMissingEmbedding(limit: 1000)) ?? []
+            guard !pending.isEmpty else { return }
+            for row in pending {
+                let url = AppPaths.reportURL(for: row.markdownPath)
+                let body = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+                let text = ReportEmbedder.makeIndexText(
+                    topic: row.topic,
+                    title: row.title,
+                    markdown: body
+                )
+                guard let vector = ReportEmbedder.shared.embed(text) else { continue }
+                try? storage.saveEmbedding(reportID: row.id, vector: vector)
+            }
+        }
     }
 
     // MARK: - Source health (P4-5)

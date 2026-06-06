@@ -354,9 +354,38 @@ enum SelfCheck {
             check("P5-6: synthesize threw \(error.localizedDescription)", false)
         }
 
+        // P8-1: semantic-search embedding. The pipeline writes a vector at
+        // save time when NLEmbedding is available. We only enforce
+        // presence when the OS shipped the sentence model — otherwise the
+        // app gracefully falls back to keyword search and writing nothing
+        // is the correct behavior.
+        if ReportEmbedder.shared.isAvailable {
+            let stored = (try? storage.allEmbeddings()) ?? []
+            let hasThisRun = stored.contains { $0.reportID == report.id }
+            check("P8-1: embedding persisted for THIS run's report", hasThisRun)
+            let hits = state_semanticSearch(storage: storage, query: topic)
+            let foundThisRun = hits.contains { $0.reportID == report.id }
+            check("P8-1: semantic search returns THIS run's report for its topic", foundThisRun)
+        } else {
+            lines.append("• P8-1: NLEmbedding unavailable on this build — semantic-search assertions skipped")
+        }
+
         lines.append("")
         lines.append("Final: \(passed ? "PASS" : "FAIL")  ·  report id: \(report.id.uuidString.prefix(8))")
         return Result(passed: passed, lines: lines)
+    }
+
+    /// Pure-data version of `AppState.semanticSearch` for the self-check.
+    /// Recomputes ranking directly from storage so we don't depend on the
+    /// MainActor `AppState` cache, which isn't populated here.
+    private struct StaticHit { let reportID: UUID; let score: Double }
+    private static func state_semanticSearch(storage: StorageManager, query: String) -> [StaticHit] {
+        guard let vector = ReportEmbedder.shared.embed(query),
+              let entries = try? storage.allEmbeddings(), !entries.isEmpty
+        else { return [] }
+        return entries
+            .map { StaticHit(reportID: $0.reportID, score: ReportEmbedder.similarity(vector, $0.vector)) }
+            .sorted { $0.score > $1.score }
     }
 }
 

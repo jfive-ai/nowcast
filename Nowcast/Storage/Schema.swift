@@ -266,6 +266,15 @@ enum Schema {
             }
         }
 
+        // v14: per-report sentence embedding for semantic search (P8-1).
+        // BLOB of little-endian Float32 values; nullable so legacy rows
+        // survive untouched and the launch-time backfill can populate them.
+        m.registerMigration("v14") { db in
+            try db.alter(table: "report") { t in
+                t.add(column: "embedding", .blob)
+            }
+        }
+
         return m
     }
 
