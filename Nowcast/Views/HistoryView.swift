@@ -20,7 +20,7 @@ struct HistoryView: View {
 
             List(selection: $selectedReport) {
                 ForEach(state.reports, id: \.self) { report in
-                    HistoryRow(report: report)
+                    HistoryRow(report: report, isBigStory: state.isBigStory(report))
                         .tag(Optional(report))
                 }
             }
@@ -31,10 +31,17 @@ struct HistoryView: View {
 
 private struct HistoryRow: View {
     let report: Report
+    let isBigStory: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: 6) {
+                if isBigStory {
+                    Image(systemName: "flame.fill")
+                        .font(.caption2)
+                        .foregroundStyle(Color.orange)
+                        .help(bigStoryTooltip)
+                }
                 if report.kind == .weeklyDigest {
                     Label("Weekly", systemImage: "calendar.badge.clock")
                         .font(.caption2.bold())
@@ -70,5 +77,12 @@ private struct HistoryRow: View {
     private static func formatCost(_ usd: Double) -> String {
         if usd < 0.01 { return "<$0.01" }
         return String(format: "$%.2f", usd)
+    }
+
+    private var bigStoryTooltip: String {
+        if let headline = report.bigStoryHeadline, !headline.isEmpty {
+            return "Big story — sources converge on: \(headline)"
+        }
+        return "Big story — unusually high cross-source agreement"
     }
 }

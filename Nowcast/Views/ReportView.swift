@@ -27,6 +27,10 @@ struct ReportView: View {
                     Text(report.displayTitle)
                         .font(.largeTitle).bold()
 
+                    if state.isBigStory(report) {
+                        bigStoryBanner
+                    }
+
                     HStack(spacing: 6) {
                         Text(report.generatedAt, style: .date)
                         Text(report.generatedAt, style: .time)
@@ -430,6 +434,37 @@ struct ReportView: View {
             parts.append(cost < 0.01 ? "~<$0.01" : String(format: "~$%.3f", cost))
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private var bigStoryBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "flame.fill")
+                .foregroundStyle(Color.orange)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Big story")
+                    .font(.callout).bold()
+                if let headline = report.bigStoryHeadline, !headline.isEmpty {
+                    Text(headline)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                } else {
+                    Text("Unusually high cross-source agreement")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.orange.opacity(0.10))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.orange.opacity(0.30), lineWidth: 0.5)
+                )
+        )
     }
 
     @ViewBuilder

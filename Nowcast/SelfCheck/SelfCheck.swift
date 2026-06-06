@@ -354,6 +354,37 @@ enum SelfCheck {
             check("P5-6: synthesize threw \(error.localizedDescription)", false)
         }
 
+        // P8-2: big-story scorer is deterministic — feed it a synthetic
+        // briefing where one cluster has 4 distinct hosts and another has
+        // 1, expect a 4 (top max-hosts) score and the multi-host cluster's
+        // headline.
+        let bigCluster = BriefingResult.Cluster(
+            id: "c1", headline: "Multi-source consensus",
+            summary: "x", claims: [],
+            citations: [
+                "https://nytimes.com/a", "https://wsj.com/b",
+                "https://bbc.com/c",     "https://reuters.com/d"
+            ]
+        )
+        let smallCluster = BriefingResult.Cluster(
+            id: "c2", headline: "Solo note",
+            summary: "y", claims: [],
+            citations: ["https://example.com/z"]
+        )
+        let synthetic = BriefingResult(
+            tldr: [], clusters: [bigCluster, smallCluster],
+            signal: "", lowConfidence: false
+        )
+        let bigOutcome = BigStoryScorer.score(synthetic)
+        check("P8-2: scorer picks max-host cluster (got score=\(bigOutcome.score))",
+              bigOutcome.score >= 4)
+        check("P8-2: scorer surfaces the consensus headline",
+              bigOutcome.headline == "Multi-source consensus")
+        check("P8-2: isBig fires above absolute floor with no priors",
+              BigStoryScorer.isBig(score: 5, comparison: []))
+        check("P8-2: isBig stays cold for a tiny score",
+              !BigStoryScorer.isBig(score: 1, comparison: []))
+
         // P8-1: semantic-search embedding. The pipeline writes a vector at
         // save time when NLEmbedding is available. We only enforce
         // presence when the OS shipped the sentence model — otherwise the

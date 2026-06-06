@@ -297,6 +297,12 @@ final class ReportPipeline {
             smartTitle = nil
         }
 
+        // P8-2: score cross-source agreement on the validated clusters so
+        // the History row and menu bar can surface a "big story" badge
+        // when many independent sources converge on one story.
+        let bigStory: BigStoryScorer.Outcome = validatedResult.map(BigStoryScorer.score)
+            ?? BigStoryScorer.Outcome(score: 0, headline: nil)
+
         let draft = Report(
             id: UUID(),
             presetID: presetID,
@@ -312,7 +318,9 @@ final class ReportPipeline {
             usdCost: totalCost > 0 ? totalCost : nil,
             modelUsed: response.model,
             providerUsed: llm.providerName,
-            title: smartTitle
+            title: smartTitle,
+            bigStoryScore: bigStory.score > 0 ? bigStory.score : nil,
+            bigStoryHeadline: bigStory.headline
         )
         let stored = try storage.insertReport(draft, markdown: markdown)
 

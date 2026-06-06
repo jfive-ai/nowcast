@@ -216,6 +216,10 @@ final class AppState: ObservableObject {
         // reports that pre-dated the v14 migration. Runs detached so it
         // never blocks UI; embeddings just appear as they complete.
         backfillEmbeddingsIfNeeded()
+
+        // P8-2: backfill big-story scores for reports that pre-dated v15.
+        // Same detached pattern; pure DB work, no network.
+        backfillBigStoryScoresIfNeeded()
     }
 
     // MARK: - Settings
@@ -363,6 +367,10 @@ final class AppState: ObservableObject {
         } catch {
             lastError = error.localizedDescription
         }
+        // P8-2: the big-story percentile depends on the full report set —
+        // invalidate the cache so a freshly-inserted brief doesn't keep
+        // comparing against a stale slice.
+        invalidateBigStoryCache()
         loadPresets()
         loadSubscriptions()
     }
@@ -451,6 +459,63 @@ final class AppState: ObservableObject {
             )
         }
         return Array(scored.sorted { $0.score > $1.score }.prefix(limit))
+    }
+
+    // MARK: - Big story (P8-2)
+
+    /// In-process cache of `(presetID? -> prior scores)` from the most
+    /// recent fetch. Saves a SQL round-trip per History row render — the
+    /// list redraws aggressively.
+    private var bigStoryScoreCache: [UUID?: [Double]] = [:]
+
+    /// True when `report.bigStoryScore` is in the top ~15% of recent
+    /// scores for its preset (or clears the absolute floor when there's
+    /// not enough history yet).
+    func isBigStory(_ report: Report) -> Bool {
+        guard let score = report.bigStoryScore, score > 0 else { return false }
+        let key: UUID? = report.presetID
+        let priors: [Double] = {
+            if let cached = bigStoryScoreCache[key] { return cached }
+            let fetched = (try? storage.bigStoryScores(presetID: key)) ?? []
+            bigStoryScoreCache[key] = fetched
+            return fetched
+        }()
+        // Remove THIS report's score from the comparison set so a brief
+        // doesn't get to compare itself.
+        let comparison = priors.filter { abs($0 - score) > .ulpOfOne || priors.count == 1 }
+        return BigStoryScorer.isBig(score: score, comparison: comparison)
+    }
+
+    /// Invalidate the per-preset scores cache. Called whenever the report
+    /// list refreshes — keeps cache from going stale after a new brief.
+    func invalidateBigStoryCache() { bigStoryScoreCache.removeAll() }
+
+    /// Backfill scores for legacy reports that pre-dated v15. Pure DB +
+    /// CPU work; runs detached.
+    func backfillBigStoryScoresIfNeeded() {
+        Task.detached { [storage] in
+            let ids = (try? storage.reportIDsMissingBigStory(limit: 1000)) ?? []
+            guard !ids.isEmpty else { return }
+            for reportID in ids {
+                let clusters = (try? storage.clusters(for: reportID)) ?? []
+                guard !clusters.isEmpty else {
+                    // No structured clusters → leave NULL so we don't pin a
+                    // misleading zero. The next live run that produces
+                    // structured output will populate them naturally.
+                    continue
+                }
+                let synthetic = BriefingResult(
+                    tldr: [], clusters: clusters, signal: "", lowConfidence: false
+                )
+                let outcome = BigStoryScorer.score(synthetic)
+                guard outcome.score > 0 else { continue }
+                try? storage.saveBigStory(
+                    reportID: reportID,
+                    score: outcome.score,
+                    headline: outcome.headline
+                )
+            }
+        }
     }
 
     /// One-shot backfill that runs in the background at launch: for every

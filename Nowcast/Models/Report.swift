@@ -41,6 +41,13 @@ struct Report: Identifiable, Codable, Hashable {
     /// when the smart-titles toggle is off or the call failed; UI falls
     /// back to `topic`.
     var title: String?
+    /// P8-2: how strongly multiple sources converge on a single story.
+    /// Higher = more "concentrated" agreement across sources. UI surfaces
+    /// the top-15% per preset as a "big story" badge.
+    var bigStoryScore: Double?
+    /// P8-2: headline of the cluster that drove `bigStoryScore`. Used for
+    /// tooltips on the History row and the ReportView banner.
+    var bigStoryHeadline: String?
 
     /// What the UI should show: smart title when present, otherwise topic.
     var displayTitle: String { (title?.isEmpty == false ? title : nil) ?? topic }
@@ -60,7 +67,9 @@ struct Report: Identifiable, Codable, Hashable {
          modelUsed: String? = nil,
          providerUsed: String? = nil,
          kind: Kind = .daily,
-         title: String? = nil) {
+         title: String? = nil,
+         bigStoryScore: Double? = nil,
+         bigStoryHeadline: String? = nil) {
         self.id = id
         self.presetID = presetID
         self.topic = topic
@@ -77,6 +86,8 @@ struct Report: Identifiable, Codable, Hashable {
         self.providerUsed = providerUsed
         self.kind = kind
         self.title = title
+        self.bigStoryScore = bigStoryScore
+        self.bigStoryHeadline = bigStoryHeadline
     }
 
     var isUnread: Bool { readAt == nil }

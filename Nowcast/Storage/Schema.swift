@@ -275,6 +275,16 @@ enum Schema {
             }
         }
 
+        // v15: "big story" cross-source agreement score per brief (P8-2).
+        // Both nullable so legacy reports stay valid; a launch-time
+        // backfill computes scores for any rows missing them.
+        m.registerMigration("v15") { db in
+            try db.alter(table: "report") { t in
+                t.add(column: "big_story_score", .double)
+                t.add(column: "big_story_headline", .text)
+            }
+        }
+
         return m
     }
 
