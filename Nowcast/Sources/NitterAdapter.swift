@@ -78,19 +78,15 @@ struct NitterAdapter: SourceAdapter {
             throw SourceError.requestFailed(kind: .xNitter)
         }
 
-        let feed: Feed = try await withCheckedThrowingContinuation { cont in
-            FeedParser(data: data).parseAsync { result in
-                switch result {
-                case .success(let f): cont.resume(returning: f)
-                case .failure(let e): cont.resume(throwing: e)
-                }
-            }
-        }
+        // FeedKit 10 replaced the closure-based `FeedParser` with synchronous
+        // throwing initializers on the universal `Feed` type.
+        let feed = try Feed(data: data)
         guard case .rss(let rss) = feed else {
             throw SourceError.requestFailed(kind: .xNitter)
         }
 
-        return (rss.items ?? []).compactMap { entry -> RawItem? in
+        // FeedKit 10 nests items under the <channel> element.
+        return (rss.channel?.items ?? []).compactMap { entry -> RawItem? in
             guard let title = entry.title?.nonEmpty,
                   let link = entry.link.flatMap(URL.init(string:)) else { return nil }
             // The RSS link points back to the Nitter mirror; rewrite to
@@ -105,7 +101,7 @@ struct NitterAdapter: SourceAdapter {
                 snippet: entry.description?.nonEmpty,
                 transcript: nil,
                 sourceKind: .xNitter,
-                author: entry.author ?? entry.dublinCore?.dcCreator
+                author: entry.author ?? entry.dublinCore?.creator
             )
         }
     }

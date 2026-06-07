@@ -16,10 +16,10 @@ settings:
 packages:
   GRDB:
     url: https://github.com/groue/GRDB.swift
-    from: "6.29.0"
+    from: "7.11.0"
   FeedKit:
     url: https://github.com/nmdias/FeedKit
-    from: "9.1.2"
+    from: "10.4.0"
 targets:
   Nowcast:
     type: application
