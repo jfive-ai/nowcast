@@ -53,7 +53,7 @@ struct RSSAdapter: SourceAdapter {
             throw SourceError.requestFailed(kind: .rss)
         }
 
-        let result = try await Self.parse(data: data)
+        let result = try Self.parse(data: data)
         let items: [RawItem]
         switch result {
         case .rss(let rss):    items = Self.normalize(rss)
@@ -71,19 +71,12 @@ struct RSSAdapter: SourceAdapter {
         }
     }
 
-    /// Wrap FeedKit's closure API in async/await.
-    private static func parse(data: Data) async throws -> Feed {
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Feed, Error>) in
-            let parser = FeedParser(data: data)
-            parser.parseAsync { result in
-                switch result {
-                case .success(let feed):
-                    cont.resume(returning: feed)
-                case .failure(let error):
-                    cont.resume(throwing: error)
-                }
-            }
-        }
+    /// Parse raw feed bytes into FeedKit's universal `Feed` model. FeedKit 10
+    /// replaced the closure-based `FeedParser` with synchronous throwing
+    /// initializers; `fetchFeed` already runs off the main actor inside a
+    /// task group, so a synchronous parse here is fine.
+    private static func parse(data: Data) throws -> Feed {
+        try Feed(data: data)
     }
 
     private static func matchesQuery(_ item: RawItem, query: String) -> Bool {
@@ -95,7 +88,8 @@ struct RSSAdapter: SourceAdapter {
     // MARK: - Normalization
 
     private static func normalize(_ feed: RSSFeed) -> [RawItem] {
-        (feed.items ?? []).compactMap { entry -> RawItem? in
+        // FeedKit 10 nests items under the <channel> element.
+        (feed.channel?.items ?? []).compactMap { entry -> RawItem? in
             guard let title = entry.title?.nonEmpty,
                   let link = entry.link.flatMap(URL.init(string:)) else { return nil }
             return RawItem(
@@ -118,7 +112,7 @@ struct RSSAdapter: SourceAdapter {
                 .attributes?.href
                 ?? entry.links?.first?.attributes?.href
             guard let hrefString = href, let url = URL(string: hrefString) else { return nil }
-            let snippet = entry.summary?.value ?? entry.content?.value
+            let snippet = entry.summary?.text ?? entry.content?.text
             return RawItem(
                 title: title,
                 url: url,

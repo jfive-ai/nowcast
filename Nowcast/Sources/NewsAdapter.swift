@@ -36,10 +36,11 @@ struct NewsAdapter: SourceAdapter {
             throw SourceError.requestFailed(kind: .news)
         }
 
-        let feed = try await Self.parseRSS(data: data)
+        let feed = try Self.parseRSS(data: data)
         let cutoff = window.earliestDate
 
-        return (feed.items ?? []).compactMap { entry -> RawItem? in
+        // FeedKit 10 nests items under the <channel> element.
+        return (feed.channel?.items ?? []).compactMap { entry -> RawItem? in
             guard let rawTitle = entry.title?.nonEmpty,
                   let link = entry.link.flatMap(URL.init(string:)) else { return nil }
             if let published = entry.pubDate, published < cutoff { return nil }
@@ -52,7 +53,7 @@ struct NewsAdapter: SourceAdapter {
                 snippet: entry.description?.nonEmpty,
                 transcript: nil,
                 sourceKind: .news,
-                author: publisher ?? entry.source?.value
+                author: publisher ?? entry.source?.text
             )
         }
     }
@@ -103,15 +104,10 @@ struct NewsAdapter: SourceAdapter {
         return (head, tail.isEmpty ? nil : tail)
     }
 
-    private static func parseRSS(data: Data) async throws -> RSSFeed {
-        let feed: Feed = try await withCheckedThrowingContinuation { cont in
-            FeedParser(data: data).parseAsync { result in
-                switch result {
-                case .success(let f): cont.resume(returning: f)
-                case .failure(let e): cont.resume(throwing: e)
-                }
-            }
-        }
+    private static func parseRSS(data: Data) throws -> RSSFeed {
+        // FeedKit 10 replaced the closure-based `FeedParser` with synchronous
+        // throwing initializers on the universal `Feed` type.
+        let feed = try Feed(data: data)
         guard case .rss(let rss) = feed else {
             throw SourceError.requestFailed(kind: .news)
         }
