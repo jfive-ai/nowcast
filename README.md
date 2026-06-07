@@ -10,6 +10,11 @@ A native macOS app that turns hours of scattered information into a 2-minute mar
 - OpenAI API by default; pluggable for other LLMs
 - SQLite (via GRDB) + flat markdown files for report storage
 
+## Requirements
+
+- **macOS 13** (Ventura) or later — deployment target.
+- **Xcode 16.3 / Swift 6.1** toolchain or later, to resolve dependencies (GRDB 7's package manifest declares `swift-tools-version:6.1`). The app itself still compiles in Swift 5 language mode.
+
 ## Phases
 
 | Phase | Scope |
