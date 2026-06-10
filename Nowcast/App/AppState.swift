@@ -163,10 +163,27 @@ final class AppState: ObservableObject {
         // prompt.
         try? storage.backfillFullTextIndexIfNeeded()
 
-        self.openAIAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.openAI) ?? ""
-        self.anthropicAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.anthropic) ?? ""
-        self.youtubeAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.youtube) ?? ""
-        self.braveAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.braveSearch) ?? ""
+        // The headless self-check gate (NOWCAST_SELF_CHECK=1) must not
+        // touch the Keychain: SecItemCopyMatching blocks on a user-approval
+        // dialog when the freshly built binary's ad-hoc signature doesn't
+        // match the one that stored the secret, hanging the gate before
+        // the check starts. SelfCheck only needs storage + MockLLMClient.
+#if DEBUG
+        let headlessSelfCheck = ProcessInfo.processInfo.environment["NOWCAST_SELF_CHECK"] == "1"
+#else
+        let headlessSelfCheck = false
+#endif
+        if headlessSelfCheck {
+            self.openAIAPIKey = ""
+            self.anthropicAPIKey = ""
+            self.youtubeAPIKey = ""
+            self.braveAPIKey = ""
+        } else {
+            self.openAIAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.openAI) ?? ""
+            self.anthropicAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.anthropic) ?? ""
+            self.youtubeAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.youtube) ?? ""
+            self.braveAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.braveSearch) ?? ""
+        }
         self.smtpSettings = SMTPSettingsStore.shared.load()
         self.retentionDays = UserDefaults.standard.object(forKey: Self.retentionDaysKey) as? Int
             ?? Self.defaultRetentionDays
@@ -198,7 +215,9 @@ final class AppState: ObservableObject {
             self?.selectedReportID = reportID
             self?.markRead(reportID: reportID)
         }
-        Task { await NotificationManager.shared.requestAuthorization() }
+        if !headlessSelfCheck {
+            Task { await NotificationManager.shared.requestAuthorization() }
+        }
 
         // Rebuild the Spotlight index from the current report set so it
         // matches reality even if the user pruned reports while the app
