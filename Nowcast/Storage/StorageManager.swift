@@ -544,12 +544,6 @@ final class StorageManager {
         }
     }
 
-    func totalClusterCount() throws -> Int {
-        try dbQueue.read { db in
-            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM cluster") ?? 0
-        }
-    }
-
     /// Load the clusters (+ claims) for a given report, ordered by `ord`.
     /// FIX (P5-3 rebase): rewritten to use a single per-cluster claim
     /// fetch and to pass through the new `counterpoint` / `gap` columns
@@ -1040,14 +1034,6 @@ final class StorageManager {
                 sql: "DELETE FROM conversation_message WHERE report_id = ?",
                 arguments: [reportID.uuidString]
             )
-        }
-    }
-
-    func conversationMessageCount(forReport reportID: UUID) throws -> Int {
-        try dbQueue.read { db in
-            try Int.fetchOne(db, sql: """
-                SELECT COUNT(*) FROM conversation_message WHERE report_id = ?
-                """, arguments: [reportID.uuidString]) ?? 0
         }
     }
 

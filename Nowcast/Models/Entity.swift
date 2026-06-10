@@ -51,15 +51,6 @@ struct Entity: Identifiable, Hashable, Codable {
     }
 }
 
-/// A single (entity ↔ report ↔ cluster) link materialized by `EntityExtractor`.
-struct EntityMention: Hashable, Codable {
-    let entityID: UUID
-    let reportID: UUID
-    /// Nullable because some mentions come from the TL;DR / signal sections,
-    /// which don't belong to any single cluster.
-    let clusterID: String?
-}
-
 /// Aggregated row used by the Entities view — entity plus the report rows
 /// it appears in.
 struct EntityTimelineRow: Identifiable {
