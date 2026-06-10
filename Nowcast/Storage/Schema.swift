@@ -298,6 +298,30 @@ enum Schema {
             }
         }
 
+        // v17: repair `report` tables whose migration ledger says v13–v16
+        // ran but where a column is missing. This happens when a dev build
+        // from an in-flight branch recorded one of those identifiers with
+        // different contents before the final migration list shipped (the
+        // observed case: `embedding` absent while v14 is marked applied,
+        // silently breaking semantic search). Conditional adds are
+        // idempotent and a no-op for healthy databases.
+        m.registerMigration("v17") { db in
+            let existing = Set(try db.columns(in: "report").map(\.name))
+            let wanted: [(String, Database.ColumnType)] = [
+                ("title", .text),
+                ("embedding", .blob),
+                ("big_story_score", .double),
+                ("big_story_headline", .text),
+                ("sentiment", .double),
+                ("sentiment_rationale", .text),
+            ]
+            for (name, type) in wanted where !existing.contains(name) {
+                try db.alter(table: "report") { t in
+                    t.add(column: name, type)
+                }
+            }
+        }
+
         return m
     }
 

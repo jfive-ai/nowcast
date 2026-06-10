@@ -125,13 +125,33 @@ struct MockLLMClient: LLMClient {
         } else if prompt.contains("Write a single 6-12 word") {
             text = Self.cannedSmartTitle
         } else {
-            text = Self.cannedBrief
+            text = Self.briefResponse(for: prompt)
         }
         return LLMResponse(
             text: text,
             model: model ?? defaultModel,
             usage: LLMUsage(promptTokens: prompt.count / 4, completionTokens: text.count / 4)
         )
+    }
+
+    /// The canned brief cites two fixed URLs, but the self-check feeds
+    /// items with per-run namespaced URLs (so the seen-index never
+    /// collides across runs). Substitute the actual input URLs from the
+    /// briefing prompt (`- url: …` lines emitted by `BriefingPrompt`) so
+    /// `CitationValidator` accepts the citations exactly as it would for
+    /// a well-behaved real model.
+    static func briefResponse(for prompt: String) -> String {
+        let urls = prompt
+            .split(separator: "\n")
+            .compactMap { line -> String? in
+                let trimmed = line.trimmingCharacters(in: .whitespaces)
+                guard trimmed.hasPrefix("- url: ") else { return nil }
+                return String(trimmed.dropFirst("- url: ".count))
+            }
+        guard urls.count >= 2 else { return cannedBrief }
+        return cannedBrief
+            .replacingOccurrences(of: "https://mock.example/one", with: urls[0])
+            .replacingOccurrences(of: "https://mock.example/two", with: urls[1])
     }
 }
 #endif
