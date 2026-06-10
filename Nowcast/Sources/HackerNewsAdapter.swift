@@ -43,7 +43,7 @@ struct HackerNewsAdapter: SourceAdapter {
             guard let title, let resolvedURL = URL(string: urlString) else { return nil }
 
             let published: Date? = isoFormatter.date(from: hit.created_at)
-                ?? Self.fallbackParse(hit.created_at)
+                ?? Self.fallbackFormatter.date(from: hit.created_at)
 
             return RawItem(
                 title: title,
@@ -58,11 +58,11 @@ struct HackerNewsAdapter: SourceAdapter {
     }
 
     /// HN sometimes returns timestamps without fractional seconds.
-    private static func fallbackParse(_ s: String) -> Date? {
+    private static let fallbackFormatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime]
-        return f.date(from: s)
-    }
+        return f
+    }()
 
     private struct HNResponse: Decodable {
         let hits: [HNHit]

@@ -106,19 +106,7 @@ struct ContradictionDetector {
     }
 
     private static func parse(_ raw: String) -> [Contradiction] {
-        let candidate: String
-        if let openRange = raw.range(of: "```"),
-           let closeRange = raw.range(of: "```", range: openRange.upperBound..<raw.endIndex) {
-            var body = String(raw[openRange.upperBound..<closeRange.lowerBound])
-            if body.hasPrefix("json") { body = String(body.dropFirst(4)) }
-            candidate = body
-        } else {
-            candidate = raw
-        }
-        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let data = trimmed.data(using: .utf8),
-              let env = try? JSONDecoder().decode(Envelope.self, from: data)
-        else { return [] }
+        guard let env = LLMJSON.decode(Envelope.self, from: raw) else { return [] }
         return env.pairs.map {
             Contradiction(
                 claimA: $0.claim_a,

@@ -114,7 +114,3 @@ struct NewsAdapter: SourceAdapter {
         return rss
     }
 }
-
-private extension String {
-    var nonEmpty: String? { isEmpty ? nil : self }
-}

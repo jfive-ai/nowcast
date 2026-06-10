@@ -164,7 +164,3 @@ struct RedditAdapter: SourceAdapter {
         let created_utc: Double?
     }
 }
-
-private extension String {
-    var nonEmpty: String? { isEmpty ? nil : self }
-}

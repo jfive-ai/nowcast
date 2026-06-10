@@ -52,8 +52,8 @@ struct QueryRewriter {
 
         do {
             let response = try await llm.summarize(prompt: prompt, model: model)
-            if let parsed = Self.extractJSON(response.text) {
-                let unique = uniqueNonEmpty(parsed)
+            if let env = LLMJSON.decode(Envelope.self, from: response.text) {
+                let unique = uniqueNonEmpty(env.subQueries)
                 let queries = unique.isEmpty ? [topic] : Array(unique.prefix(Self.maxSubQueries))
                 return TrackedRewrite(queries: queries, usage: response.usage, model: response.model)
             }
@@ -64,27 +64,6 @@ struct QueryRewriter {
     }
 
     private struct Envelope: Decodable { let subQueries: [String] }
-
-    /// Pulls the JSON object out of free-form text (model may have wrapped
-    /// it in markdown despite instructions).
-    private static func extractJSON(_ raw: String) -> [String]? {
-        let candidate: String
-        if let openRange = raw.range(of: "```"),
-           let closeRange = raw.range(of: "```", range: openRange.upperBound..<raw.endIndex) {
-            // strip optional ```json language tag
-            var body = String(raw[openRange.upperBound..<closeRange.lowerBound])
-            if body.hasPrefix("json") { body = String(body.dropFirst(4)) }
-            candidate = body
-        } else {
-            candidate = raw
-        }
-        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        guard let data = trimmed.data(using: .utf8),
-              let env = try? JSONDecoder().decode(Envelope.self, from: data)
-        else { return nil }
-        return env.subQueries
-    }
 
     private func uniqueNonEmpty(_ subs: [String]) -> [String] {
         var seen = Set<String>()

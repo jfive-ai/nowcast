@@ -68,12 +68,6 @@ final class FollowUpSuggester {
     }
 
     static func parse(_ raw: String) -> [Suggestion] {
-        guard let start = raw.firstIndex(of: "{"),
-              let end = raw.lastIndex(of: "}"),
-              start <= end
-        else { return [] }
-        let json = String(raw[start...end])
-        guard let data = json.data(using: .utf8) else { return [] }
         struct Envelope: Decodable {
             struct Hit: Decodable {
                 let name: String
@@ -82,7 +76,7 @@ final class FollowUpSuggester {
             }
             let suggestions: [Hit]
         }
-        let decoded = (try? JSONDecoder().decode(Envelope.self, from: data)) ?? Envelope(suggestions: [])
+        guard let decoded = LLMJSON.decode(Envelope.self, from: raw) else { return [] }
         // FIX (codex review PR #70 P2): tolerate the LLM emitting either
         // `braveSearch`/`nitter` (the prompt's old labels) or the actual
         // SourceKind raw values (`web`/`xNitter`). Map common aliases so

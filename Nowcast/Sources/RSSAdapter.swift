@@ -141,7 +141,3 @@ struct RSSAdapter: SourceAdapter {
         }
     }
 }
-
-private extension String {
-    var nonEmpty: String? { isEmpty ? nil : self }
-}

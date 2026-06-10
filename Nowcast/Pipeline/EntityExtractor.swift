@@ -90,18 +90,10 @@ final class EntityExtractor {
         """
 
         let response = try await llm.summarize(prompt: prompt, model: model)
-        return try Self.parseEnvelope(response.text, clusters: briefing.clusters)
+        return Self.parseEnvelope(response.text, clusters: briefing.clusters)
     }
 
-    static func parseEnvelope(_ raw: String, clusters: [BriefingResult.Cluster]) throws -> [Extracted] {
-        // Pick the first valid JSON object in the response.
-        guard let start = raw.firstIndex(of: "{"),
-              let end = raw.lastIndex(of: "}"),
-              start <= end
-        else { return [] }
-        let json = String(raw[start...end])
-        guard let data = json.data(using: .utf8) else { return [] }
-
+    static func parseEnvelope(_ raw: String, clusters: [BriefingResult.Cluster]) -> [Extracted] {
         struct Envelope: Decodable {
             struct Hit: Decodable {
                 let name: String
@@ -111,7 +103,7 @@ final class EntityExtractor {
             let entities: [Hit]
         }
 
-        let decoded = try JSONDecoder().decode(Envelope.self, from: data)
+        guard let decoded = LLMJSON.decode(Envelope.self, from: raw) else { return [] }
         let clusterIDByLabel: [String: String] = Dictionary(
             uniqueKeysWithValues: clusters.enumerated().map { (idx, c) in ("c\(idx + 1)", c.id) }
         )

@@ -123,7 +123,3 @@ struct NitterAdapter: SourceAdapter {
         return s
     }
 }
-
-private extension String {
-    var nonEmpty: String? { isEmpty ? nil : self }
-}
