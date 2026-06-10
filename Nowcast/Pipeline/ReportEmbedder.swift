@@ -1,7 +1,7 @@
 import Foundation
 import NaturalLanguage
 
-/// Local, on-device sentence embedder (P8-1). Wraps Apple's
+/// Local, on-device sentence embedder. Wraps Apple's
 /// `NLEmbedding.sentenceEmbedding(for: .english)` — runs entirely on the
 /// user's machine with zero network calls and no API key.
 ///

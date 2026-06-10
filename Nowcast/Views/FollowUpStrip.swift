@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Horizontal chip strip rendered above a finished brief, surfacing 3
-/// AI-suggested follow-up presets (P6-4). Clicking a chip presents
+/// AI-suggested follow-up presets. Clicking a chip presents
 /// `TopicPresetEditor` pre-filled with the suggestion's name / query /
 /// sources, so creating the preset is a single confirmation.
 struct FollowUpStrip: View {

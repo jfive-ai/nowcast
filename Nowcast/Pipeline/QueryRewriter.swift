@@ -28,7 +28,6 @@ struct QueryRewriter {
 
     /// Result envelope with usage tokens so the pipeline can roll the
     /// rewriter's cost into the final report's accounting.
-    /// FIX (codex review PR #45).
     struct TrackedRewrite {
         let queries: [String]
         let usage: LLMUsage?

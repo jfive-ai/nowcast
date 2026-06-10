@@ -279,11 +279,10 @@ struct TopicPresetEditor: View {
         var channels: [DeliveryChannel] = [.inApp]
         if deliveryNotification { channels.append(.notification) }
         if deliveryMenuBar { channels.append(.menuBar) }
-        // FIX (codex review PR #59 P2): preserve ALL existing webhook
-        // channels that aren't the one the user is editing via the
-        // single editor form. Save would otherwise silently drop every
-        // webhook past the first when the preset originally fanned out
-        // to multiple destinations.
+        // Preserve ALL existing webhook channels that aren't the one the
+        // user is editing via the single editor form. Save would
+        // otherwise silently drop every webhook past the first when the
+        // preset originally fanned out to multiple destinations.
         let editedURL = deliveryWebhookURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let existingWebhooks = (original?.deliveryChannels ?? []).compactMap(\.webhookConfig)
         // The first existing webhook is the one bound to this form;
@@ -297,12 +296,11 @@ struct TopicPresetEditor: View {
 
         let orderedSources = SourceKind.allCases.filter { sources.contains($0) }
 
-        // FIX (codex review PR #61 P1): re-read the preset from AppState
-        // before reconstructing it, so that a click on "Run weekly digest
-        // now" that updated `last_weekly_at` between edit-open and Save
-        // isn't clobbered by the stale `original` snapshot. The same
-        // applies to `lastRunAt`, which the background scheduler may
-        // update concurrently.
+        // Re-read the preset from AppState before reconstructing it, so
+        // a click on "Run weekly digest now" that updated `last_weekly_at`
+        // between edit-open and Save isn't clobbered by the stale
+        // `original` snapshot. The same applies to `lastRunAt`, which the
+        // background scheduler may update concurrently.
         let fresh = original.flatMap { o in state.presets.first(where: { $0.id == o.id }) }
         let liveLastRunAt = fresh?.lastRunAt ?? original?.lastRunAt
         let liveLastWeeklyAt = fresh?.lastWeeklyAt ?? original?.lastWeeklyAt

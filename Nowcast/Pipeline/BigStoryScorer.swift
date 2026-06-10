@@ -1,7 +1,7 @@
 import Foundation
 
 /// Computes a single "how concentrated is this brief?" score from a
-/// `BriefingResult` (P8-2). The intuition: when many independent sources
+/// `BriefingResult`. The intuition: when many independent sources
 /// converge on the same story, *that's* what reporters call "the story" —
 /// and that's what should jump out of the History list at a glance.
 ///

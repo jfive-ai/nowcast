@@ -15,7 +15,7 @@ final class AppState: ObservableObject {
     @Published private(set) var unreadCount: Int = 0
     @Published var lastError: String?
     @Published var isGenerating: Bool = false
-    /// Live state of the in-flight generation (P5-5). `nil` when idle.
+    /// Live state of the in-flight generation. `nil` when idle.
     @Published var generation: GenerationState? = nil
     @Published var isSuggesting: Bool = false
     /// Bound by `ContentView` so external triggers (notifications, menu bar)
@@ -85,7 +85,7 @@ final class AppState: ObservableObject {
     }
 
     /// Fan-out the user's topic into 2-4 sub-queries before fetching.
-    /// Costs one extra (cheap) LLM call per run. P4-9.
+    /// Costs one extra (cheap) LLM call per run.
     @Published var queryRewritingEnabled: Bool {
         didSet {
             UserDefaults.standard.set(queryRewritingEnabled, forKey: Self.queryRewritingKey)
@@ -94,7 +94,7 @@ final class AppState: ObservableObject {
     }
 
     /// Second-pass LLM scan over the brief's claims for cross-source
-    /// disagreement. Costs one extra LLM call. P4-10.
+    /// disagreement. Costs one extra LLM call.
     @Published var contradictionDetectionEnabled: Bool {
         didSet {
             UserDefaults.standard.set(contradictionDetectionEnabled, forKey: Self.contradictionDetectionKey)
@@ -103,7 +103,7 @@ final class AppState: ObservableObject {
     }
 
     /// Cross-brief entity extraction. One cheap LLM call per run, plus
-    /// rule-based fallback. P5-2.
+    /// rule-based fallback.
     @Published var entityExtractionEnabled: Bool {
         didSet {
             UserDefaults.standard.set(entityExtractionEnabled, forKey: Self.entityExtractionKey)
@@ -112,7 +112,7 @@ final class AppState: ObservableObject {
     }
 
     /// Steel-man counter-argument + "what's not covered" pass. One extra
-    /// LLM call per brief. P5-3.
+    /// LLM call per brief.
     @Published var counterpointsEnabled: Bool {
         didSet {
             UserDefaults.standard.set(counterpointsEnabled, forKey: Self.counterpointsKey)
@@ -121,7 +121,7 @@ final class AppState: ObservableObject {
     }
 
     /// Smart auto-generated brief titles. One small extra LLM call per
-    /// brief. P7-2.
+    /// brief.
     @Published var smartTitlesEnabled: Bool {
         didSet {
             UserDefaults.standard.set(smartTitlesEnabled, forKey: Self.smartTitlesKey)
@@ -156,11 +156,11 @@ final class AppState: ObservableObject {
             fatalError("Failed to open Nowcast database: \(error)")
         }
 
-        // FIX (codex review PR #31): backfill the FTS index BEFORE the
-        // rest of init() runs. Keychain calls later in this init can
-        // block under certain TCC states, and we want the in-app search
-        // surface to be populated against historical reports the moment
-        // the user opens the window — independent of any prompt.
+        // Backfill the FTS index BEFORE the rest of init() runs. Keychain
+        // calls later in this init can block under certain TCC states,
+        // and the in-app search surface should cover historical reports
+        // the moment the user opens the window — independent of any
+        // prompt.
         try? storage.backfillFullTextIndexIfNeeded()
 
         self.openAIAPIKey = KeychainStore.shared.getSecret(account: KeychainAccount.openAI) ?? ""
@@ -207,17 +207,17 @@ final class AppState: ObservableObject {
             (try? self?.storage.loadMarkdown(for: report)) ?? ""
         }
 
-        // P5-6: at launch, fire any due weekly digests for opt-in presets.
+        // At launch, fire any due weekly digests for opt-in presets.
         Task { [weak self] in
             await self?.runDueWeeklyDigests()
         }
 
-        // P8-1: populate semantic-search vectors for any pre-existing
-        // reports that pre-dated the v14 migration. Runs detached so it
-        // never blocks UI; embeddings just appear as they complete.
+        // Populate semantic-search vectors for any reports that pre-dated
+        // the v14 migration. Runs detached so it never blocks UI;
+        // embeddings just appear as they complete.
         backfillEmbeddingsIfNeeded()
 
-        // P8-2: backfill big-story scores for reports that pre-dated v15.
+        // Backfill big-story scores for reports that pre-dated v15.
         // Same detached pattern; pure DB work, no network.
         backfillBigStoryScoresIfNeeded()
     }
@@ -278,10 +278,9 @@ final class AppState: ObservableObject {
         try? storage.updatePresetLastRun(id: preset.id, at: Date())
         loadPresets()
 
-        // FIX (codex review PR #61 P2): check for due weekly digests
-        // after every preset run, not only at app startup. In long-lived
-        // sessions (the user keeps the app open), a weekly digest that
-        // becomes due mid-week wouldn't auto-synthesize until restart.
+        // Check for due weekly digests after every preset run, not only
+        // at app startup — in a long-lived session a digest that becomes
+        // due mid-week would otherwise wait until restart.
         await runDueWeeklyDigests()
     }
 
@@ -294,15 +293,12 @@ final class AppState: ObservableObject {
             return
         }
         isGenerating = true
-        // FIX (codex review PR #60 P1): the delayed clear used to snapshot
-        // `generation` BEFORE sleeping, then only clear if it was still
-        // value-equal. But pipeline progress events (incl. the terminal
-        // `.done` event) arrive via queued `Task { @MainActor }` blocks
-        // and can land AFTER we snapshot, leaving `generation` mutated
-        // and the equality check failing forever (overlay never clears).
-        // We now key the cleanup on a per-run UUID stored *inside* the
-        // GenerationState so subsequent stage updates can't invalidate
-        // our cleanup token.
+        // The delayed clear below is keyed on a per-run UUID stored
+        // *inside* the GenerationState. Pipeline progress events (incl.
+        // the terminal `.done`) arrive via queued `Task { @MainActor }`
+        // blocks and can mutate `generation` after a value snapshot, so a
+        // value-equality check could fail forever and never clear the
+        // overlay.
         let runID = UUID()
         generation = GenerationState(runID: runID, topic: topic, startedAt: Date())
         defer {
@@ -341,7 +337,7 @@ final class AppState: ObservableObject {
                 if preset.deliveryChannels.contains(.email) {
                     await sendEmailDigest(report: report)
                 }
-                // P5-4: webhook delivery. Each preset can have N webhook
+                // Webhook delivery. Each preset can have N webhook
                 // channels; each one POSTs independently. Failures land
                 // in `lastError` but never block the report from saving.
                 for channel in preset.deliveryChannels {
@@ -367,7 +363,7 @@ final class AppState: ObservableObject {
         } catch {
             lastError = error.localizedDescription
         }
-        // P8-2: the big-story percentile depends on the full report set —
+        // The big-story percentile depends on the full report set —
         // invalidate the cache so a freshly-inserted brief doesn't keep
         // comparing against a stale slice.
         invalidateBigStoryCache()
@@ -386,11 +382,10 @@ final class AppState: ObservableObject {
     }
 
     func applyRetention() {
-        // FIX (review #6): always prune the seen-index (90d cutoff,
-        // independent of report retention). Previously this was gated by
-        // `retentionDays > 0`, so a user who chose "keep reports forever"
-        // got unbounded seen_item growth — and `filterUnseen` slows down
-        // proportionally.
+        // Always prune the seen-index (90d cutoff, independent of report
+        // retention). Gating it on `retentionDays > 0` would give a
+        // keep-reports-forever user unbounded seen_item growth — and
+        // `filterUnseen` slows down proportionally.
         try? storage.pruneSeenItems()
         guard retentionDays > 0 else {
             refresh()
@@ -406,7 +401,7 @@ final class AppState: ObservableObject {
         }
     }
 
-    // MARK: - Sidebar selection (P4-6)
+    // MARK: - Sidebar selection
 
     enum SidebarSection: String, Hashable {
         case history
@@ -415,13 +410,13 @@ final class AppState: ObservableObject {
     }
     @Published var sidebarSelection: SidebarSection = .history
 
-    // MARK: - Search (P4-6)
+    // MARK: - Search
 
     func searchReports(_ query: String) -> [StorageManager.SearchHit] {
         (try? storage.searchReports(query)) ?? []
     }
 
-    // MARK: - Semantic search (P8-1)
+    // MARK: - Semantic search
 
     struct SemanticHit: Hashable, Identifiable {
         let reportID: UUID
@@ -461,7 +456,7 @@ final class AppState: ObservableObject {
         return Array(scored.sorted { $0.score > $1.score }.prefix(limit))
     }
 
-    // MARK: - Big story (P8-2)
+    // MARK: - Big story
 
     /// In-process cache of `(presetID? -> prior scores)` from the most
     /// recent fetch. Saves a SQL round-trip per History row render — the
@@ -541,13 +536,13 @@ final class AppState: ObservableObject {
         }
     }
 
-    // MARK: - Source health (P4-5)
+    // MARK: - Source health
 
     func sourceHealthRows(days: Int = 30) throws -> [SourceHealth] {
         try storage.sourceHealth(days: days)
     }
 
-    // MARK: - Feedback (P4-4)
+    // MARK: - Feedback
 
     func feedback(target: Feedback.Target, targetID: String) -> [Feedback] {
         (try? storage.feedback(target: target, targetID: targetID)) ?? []
@@ -715,7 +710,7 @@ final class AppState: ObservableObject {
         )
     }
 
-    /// P5-6: scan opt-in presets, fire a weekly synth for each that's due.
+    /// Scan opt-in presets, fire a weekly synth for each that's due.
     /// Called once at launch and after each preset run. No-op for presets
     /// without the toggle or that already ran in the past 7 days.
     func runDueWeeklyDigests() async {
@@ -818,7 +813,7 @@ final class AppState: ObservableObject {
         )
     }
 
-    // MARK: - Entities (P5-2)
+    // MARK: - Entities
 
     func topEntities(limit: Int = 100, kind: Entity.Kind? = nil) -> [Entity] {
         (try? storage.topEntities(limit: limit, kind: kind)) ?? []
@@ -828,13 +823,13 @@ final class AppState: ObservableObject {
         (try? storage.mentions(forEntity: id)) ?? []
     }
 
-    // MARK: - Items (P6-1, P6-2)
+    // MARK: - Items
 
     func itemsForReport(_ reportID: UUID) -> [PersistedItem] {
         (try? storage.itemsForReport(reportID)) ?? []
     }
 
-    // MARK: - Source reliability (P7-1)
+    // MARK: - Source reliability
 
     /// Lazily-computed and cached for ~60s — the full join is expensive
     /// once the user has hundreds of items, and the popover hits this on
@@ -856,7 +851,7 @@ final class AppState: ObservableObject {
         return sourceReliability(limit: 500).first { $0.host == normalized }
     }
 
-    // MARK: - Follow-up suggestions (P6-4)
+    // MARK: - Follow-up suggestions
 
     func suggestFollowUps(for report: Report,
                           tldr: [String],
@@ -871,7 +866,7 @@ final class AppState: ObservableObject {
         )
     }
 
-    // MARK: - Compare (P6-3)
+    // MARK: - Compare
 
     /// Reports the user can plausibly compare with `report` — same preset
     /// (if any), otherwise same topic string; never the report itself.
@@ -888,11 +883,10 @@ final class AppState: ObservableObject {
     }
 
     /// Looks up the chronologically-prior report on the same topic/preset.
-    /// Convenience for the "Compare with prior" shortcut.
-    /// FIX (codex review PR #69 P2): bypass the default candidate cap so
-    /// the lookup can find the immediately-prior report even on topics
-    /// that have many newer entries. The cap is intended for the
-    /// compare-picker UI, not for the prior-finder.
+    /// Convenience for the "Compare with prior" shortcut. Bypasses the
+    /// default candidate cap (intended for the compare-picker UI) so the
+    /// lookup finds the immediately-prior report even on topics with many
+    /// newer entries.
     func priorReport(for report: Report) -> Report? {
         candidateReportsForCompare(report, limit: .max)
             .first { $0.generatedAt < report.generatedAt }

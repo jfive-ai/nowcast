@@ -35,7 +35,6 @@ struct ContradictionDetector {
 
     /// Result envelope with usage tokens so the pipeline can include the
     /// contradiction-pass spend in the report's cost accounting.
-    /// FIX (codex review PRs #35, #46).
     struct TrackedDetection {
         let pairs: [Contradiction]
         let usage: LLMUsage?

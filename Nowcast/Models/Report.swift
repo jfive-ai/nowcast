@@ -34,24 +34,24 @@ struct Report: Identifiable, Codable, Hashable {
     let usdCost: Double?
     let modelUsed: String?
     let providerUsed: String?
-    /// Discriminates daily briefs from synthesized weekly digests (P5-6).
+    /// Discriminates daily briefs from synthesized weekly digests.
     /// Defaults to .daily for rows that pre-dated the v12 migration.
     var kind: Kind
-    /// P7-2: optional LLM-generated headline summarizing the brief. Nil
-    /// when the smart-titles toggle is off or the call failed; UI falls
-    /// back to `topic`.
+    /// Optional LLM-generated headline summarizing the brief. Nil when
+    /// the smart-titles toggle is off or the call failed; UI falls back
+    /// to `topic`.
     var title: String?
-    /// P8-2: how strongly multiple sources converge on a single story.
+    /// How strongly multiple sources converge on a single story.
     /// Higher = more "concentrated" agreement across sources. UI surfaces
     /// the top-15% per preset as a "big story" badge.
     var bigStoryScore: Double?
-    /// P8-2: headline of the cluster that drove `bigStoryScore`. Used for
+    /// Headline of the cluster that drove `bigStoryScore`. Used for
     /// tooltips on the History row and the ReportView banner.
     var bigStoryHeadline: String?
-    /// P8-3: LLM-reported overall tone of the *coverage* in [-1, +1].
+    /// LLM-reported overall tone of the *coverage* in [-1, +1].
     /// Nil for legacy briefs or providers that omitted the field.
     var sentiment: Double?
-    /// P8-3: one-line rationale shown on the trend chart hover and the
+    /// One-line rationale shown on the trend chart hover and the
     /// in-report sentiment indicator.
     var sentimentRationale: String?
 

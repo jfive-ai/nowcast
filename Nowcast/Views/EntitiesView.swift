@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Sidebar tab that surfaces the cross-brief entity index built by
-/// `EntityExtractor` (P5-2). Left: ranked list of entities with mention
+/// `EntityExtractor`. Left: ranked list of entities with mention
 /// counts. Right (the larger detail pane): timeline of mentions for the
 /// selected entity, each row jumps into the originating report.
 struct EntitiesView: View {

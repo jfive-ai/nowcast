@@ -1,6 +1,6 @@
 import Foundation
 
-/// Posts a finished report to a user-supplied webhook URL (P5-4). Three
+/// Posts a finished report to a user-supplied webhook URL. Three
 /// payload formats are supported (Slack, Discord, generic JSON); the
 /// caller picks one — or `WebhookFormat.detect(from:)` infers it from
 /// the URL host.

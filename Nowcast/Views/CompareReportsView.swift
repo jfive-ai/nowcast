@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Side-by-side comparison of two reports on the same topic / preset
-/// (P6-3). Renders both bodies in parallel scroll columns and prints the
+///. Renders both bodies in parallel scroll columns and prints the
 /// cluster-level delta (added / continuing / dropped) at the top.
 struct CompareReportsView: View {
     @EnvironmentObject private var state: AppState

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Pulls a flat list of named entities out of a `BriefingResult` and
-/// persists them via `StorageManager` (P5-2). Best-effort: any failure
+/// persists them via `StorageManager`. Best-effort: any failure
 /// degrades to a rule-based fallback rather than aborting the report.
 final class EntityExtractor {
     struct Extracted: Codable, Equatable {
@@ -27,9 +27,9 @@ final class EntityExtractor {
                 storage: StorageManager) async {
         let extracted = await extract(briefing: briefing)
         guard !extracted.isEmpty else { return }
-        // FIX (codex review PR #67 P2): `saveBriefing` stores cluster.id
-        // as `"<reportID>:<briefingClusterID>"` so foreign joins succeed.
-        // Apply the same prefix here so entity_mention.cluster_id matches.
+        // `saveBriefing` stores cluster.id as
+        // `"<reportID>:<briefingClusterID>"`; apply the same prefix here
+        // so entity_mention.cluster_id joins back to cluster.id.
         for hit in extracted {
             do {
                 let entityID = try storage.upsertEntity(name: hit.name, kind: hit.kind)

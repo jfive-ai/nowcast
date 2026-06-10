@@ -1,6 +1,6 @@
 import Foundation
 
-/// A named entity surfaced across one or more briefings (P5-2).
+/// A named entity surfaced across one or more briefings.
 struct Entity: Identifiable, Hashable, Codable {
     enum Kind: String, Codable, CaseIterable, Identifiable {
         case person

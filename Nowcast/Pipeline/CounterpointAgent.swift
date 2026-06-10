@@ -2,7 +2,7 @@ import Foundation
 
 /// Second-pass agent that reads a generated briefing and asks the model
 /// to produce a steel-manned counter-argument and a "what's not covered"
-/// gap per cluster (P5-3). Strict envelope; refuses to invent.
+/// gap per cluster. Strict envelope; refuses to invent.
 final class CounterpointAgent {
     struct Hit: Codable, Equatable {
         /// Matches the temporary `c1`, `c2`… labels assigned in the prompt,

@@ -15,11 +15,9 @@ enum URLCanonicalizer {
         "igshid", "spm", "_hsenc", "_hsmi", "yclid", "msclkid",
     ]
 
-    // FIX (codex review PR #58): YouTube share-only params are stripped
-    // regardless of which URL form was used (`youtu.be/...` or
-    // `youtube.com/watch?v=...`). Previously only the short form was
-    // normalized, so `youtu.be/abc?t=30` and
-    // `youtube.com/watch?v=abc&t=30` hashed differently.
+    // YouTube share-only params, stripped regardless of which URL form
+    // was used — otherwise `youtu.be/abc?t=30` and
+    // `youtube.com/watch?v=abc&t=30` hash differently.
     private static let youtubeShareOnly: Set<String> = [
         "si", "feature", "pp", "t", "ab_channel",
     ]
@@ -62,11 +60,9 @@ enum URLCanonicalizer {
             comps.path.removeLast()
         }
 
-        // YouTube short → long form.
-        // FIX (review #12, codex review PR #58): strip share-only params
-        // on BOTH youtu.be and youtube.com/watch URLs so identical videos
-        // collapse to the same canonical regardless of which link form
-        // was shared.
+        // YouTube short → long form. Share-only params are stripped on
+        // BOTH youtu.be and youtube.com/watch URLs so identical videos
+        // collapse to the same canonical regardless of link form.
         if comps.host == "youtu.be", comps.path.count > 1 {
             let videoID = String(comps.path.dropFirst())
             comps.host = "youtube.com"

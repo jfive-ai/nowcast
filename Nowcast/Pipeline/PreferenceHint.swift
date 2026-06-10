@@ -6,12 +6,12 @@ import Foundation
 /// these themes — false positives shouldn't blow away real news.
 enum PreferenceHint {
     static func build(from headlines: [String]) -> String? {
-        // FIX (codex review PR #40): sanitize each headline before
-        // interpolation. Headlines originate from prior LLM output and can
-        // contain newlines, markdown control chars, or prompt-injection
-        // payloads ("Ignore prior instructions and ..."). Collapse
-        // whitespace, strip control characters, drop markdown sigils,
-        // and clamp length so each headline stays inert bullet data.
+        // Sanitize each headline before interpolation. Headlines
+        // originate from prior LLM output and can contain newlines,
+        // markdown control chars, or prompt-injection payloads ("Ignore
+        // prior instructions and ..."). Collapse whitespace, strip
+        // control characters, drop markdown sigils, and clamp length so
+        // each headline stays inert bullet data.
         let sanitized = headlines
             .map { sanitize($0) }
             .filter { !$0.isEmpty }

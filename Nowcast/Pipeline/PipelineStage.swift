@@ -1,6 +1,6 @@
 import Foundation
 
-/// Events the pipeline emits while it's running (P5-5). Consumed by
+/// Events the pipeline emits while it's running. Consumed by
 /// `AppState` to drive a live stage-by-stage timeline in the UI so the
 /// user can see where a generation is spending its time.
 enum PipelineStage: Hashable, Codable {
@@ -65,10 +65,10 @@ enum PipelineStage: Hashable, Codable {
 /// Aggregated state the UI binds to. The pipeline pushes new stages into
 /// `history` via the callback; the UI just reads.
 struct GenerationState: Equatable {
-    /// FIX (codex review PR #60 P1): identifies this generation run so
-    /// the AppState's delayed cleanup can match exactly the run it
-    /// scheduled, instead of failing equality if a queued progress
-    /// update mutates `history` between snapshot and clear.
+    /// Identifies this generation run so AppState's delayed cleanup can
+    /// match exactly the run it scheduled, instead of failing equality if
+    /// a queued progress update mutates `history` between snapshot and
+    /// clear.
     let runID: UUID
     let topic: String
     let startedAt: Date
@@ -92,11 +92,10 @@ struct GenerationState: Equatable {
         current = stage
     }
 
-    /// FIX (codex review PR #60 P2): freeze the elapsed clock once the
-    /// pipeline reports `.done` (so the overlay shows total runtime).
-    /// While generation is still in flight, advance against `Date()` so
-    /// the clock doesn't pin to whatever the most recent stage timestamp
-    /// was — long LLM gaps used to freeze the timer.
+    /// Freezes the elapsed clock once the pipeline reports `.done` (so
+    /// the overlay shows total runtime). While generation is in flight it
+    /// advances against `Date()` so the clock doesn't pin to the most
+    /// recent stage timestamp during long LLM gaps.
     var elapsed: TimeInterval {
         let end: Date
         if isFinished, let last = history.last?.at {
