@@ -15,12 +15,20 @@ concurrency:
 
 jobs:
   build-and-selfcheck:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 30
     env:
       DERIVED: ${{ github.workspace }}/.derived
     steps:
       - uses: actions/checkout@v4
+
+      # XcodeGen (latest from Homebrew) emits a recent project format, and
+      # GRDB 7's manifest declares swift-tools-version:6.1, so we need a
+      # current Xcode — the runner's default can be too old to read either.
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
 
       - name: Show toolchain
         run: |
