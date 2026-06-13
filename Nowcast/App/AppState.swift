@@ -385,6 +385,21 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Delete a single report (History context menu). Removes its Spotlight
+    /// entry, clears the selection if it pointed here, and refreshes. The
+    /// underlying storage delete also prunes the report's markdown file and
+    /// any now-orphaned item rows.
+    func deleteReport(_ report: Report) {
+        do {
+            let removed = try storage.deleteReports(ids: [report.id])
+            SpotlightIndexer.shared.remove(reportIDs: removed)
+            if selectedReportID == report.id { selectedReportID = nil }
+            refresh()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
     func applyRetention() {
         // FIX (review #6): always prune the seen-index (90d cutoff,
         // independent of report retention). Previously this was gated by
