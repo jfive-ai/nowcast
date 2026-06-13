@@ -426,8 +426,14 @@ final class AppState: ObservableObject {
             // removes anything, so an over-aggressive retention window is
             // recoverable from the backups/ folder.
             if let count = try? storage.reportCount(olderThan: cutoff), count > 0 {
-                if let backup = try? storage.backupDatabase() {
+                do {
+                    let backup = try storage.backupDatabase()
                     Log.storage.info("retention: backed up DB before pruning \(count, privacy: .public) report(s) → \(backup.lastPathComponent, privacy: .public)")
+                } catch {
+                    // Best-effort: a failed backup must not block retention
+                    // forever (e.g. disk full), but log loudly so the prune
+                    // isn't silently unrecoverable.
+                    Log.storage.error("retention: pre-prune backup FAILED, pruning anyway: \(error.redactedDescription, privacy: .public)")
                 }
             }
             let removed = try storage.deleteReports(olderThan: cutoff)
