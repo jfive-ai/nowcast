@@ -1,8 +1,8 @@
 import Foundation
 
 /// Utility namespace for splitting a markdown line into prose + link
-/// segments (P6-1). Consumed by `MarkdownLineView` to render citation
-/// chips with hover popovers under each paragraph.
+/// segments (P6-1). Consumed by `BriefInlineText` / `CitationChipRow` to render
+/// citation chips with hover popovers under each line.
 enum MarkdownLinkText {
     enum Segment {
         case plain(String)
