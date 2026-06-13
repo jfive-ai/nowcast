@@ -536,6 +536,21 @@ enum SelfCheck {
         check("prod-11: seen_item pruned when its preset is deleted",
               (try? storage.seenItemCount(presetID: seenProbePreset.id)) == 0)
 
+        // prod-12: deleting a report also removes its markdown file.
+        let fileProbe = Report(
+            id: UUID(), presetID: nil, topic: "File probe \(runID)",
+            window: .today, generatedAt: Date(), markdownPath: "",
+            byteSize: 0, sourceCount: 1, kind: .daily
+        )
+        if let storedFileProbe = try? storage.insertReport(fileProbe, markdown: "# file probe \(runID)\n") {
+            let fileURL = AppPaths.reportURL(for: storedFileProbe.markdownPath)
+            check("prod-12: report markdown file present after insert",
+                  FileManager.default.fileExists(atPath: fileURL.path))
+            _ = try? storage.deleteReports(ids: [storedFileProbe.id])
+            check("prod-12: report markdown file removed after delete",
+                  !FileManager.default.fileExists(atPath: fileURL.path))
+        }
+
         lines.append("")
         lines.append("Final: \(passed ? "PASS" : "FAIL")  ·  report id: \(report.id.uuidString.prefix(8))")
         return Result(passed: passed, lines: lines)
