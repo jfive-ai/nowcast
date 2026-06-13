@@ -214,6 +214,22 @@ final class StorageManager {
         }
     }
 
+    /// Add token/cost to a report's running totals. Used for aux LLM calls
+    /// (e.g. entity extraction) that run AFTER the report row is inserted, so
+    /// their spend isn't silently dropped from the cost the user sees (prod-13).
+    func addReportUsage(reportID: UUID, promptTokens: Int, completionTokens: Int, usdCost: Double) throws {
+        guard promptTokens > 0 || completionTokens > 0 || usdCost > 0 else { return }
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE report SET
+                    prompt_tokens = COALESCE(prompt_tokens, 0) + ?,
+                    completion_tokens = COALESCE(completion_tokens, 0) + ?,
+                    usd_cost = COALESCE(usd_cost, 0) + ?
+                WHERE id = ?
+                """, arguments: [promptTokens, completionTokens, usdCost, reportID.uuidString])
+        }
+    }
+
     private func delete(reports: [Report]) throws {
         let ids = reports.map(\.id.uuidString)
         guard !ids.isEmpty else { return }

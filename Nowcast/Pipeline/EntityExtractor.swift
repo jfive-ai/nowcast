@@ -22,11 +22,21 @@ final class EntityExtractor {
     /// Runs the extractor end-to-end: calls the LLM (or rule fallback),
     /// upserts each entity, records mentions against `reportID`. Swallows
     /// all errors — the caller treats this as fire-and-forget enrichment.
+    /// Usage of the (otherwise-untracked) entity-extraction LLM call so the
+    /// pipeline can fold it into the report's cost (prod-13). nil when the
+    /// rule-based fallback ran (no LLM call).
+    struct TrackedUsage {
+        let usage: LLMUsage?
+        let model: String
+    }
+
+    @discardableResult
     func enrich(briefing: BriefingResult,
                 reportID: UUID,
-                storage: StorageManager) async {
-        let extracted = await extract(briefing: briefing)
-        guard !extracted.isEmpty else { return }
+                storage: StorageManager) async -> TrackedUsage {
+        let tracked = await extractTracked(briefing: briefing)
+        let extracted = tracked.hits
+        guard !extracted.isEmpty else { return TrackedUsage(usage: tracked.usage, model: tracked.model) }
         // FIX (codex review PR #67 P2): `saveBriefing` stores cluster.id
         // as `"<reportID>:<briefingClusterID>"` so foreign joins succeed.
         // Apply the same prefix here so entity_mention.cluster_id matches.
@@ -43,26 +53,33 @@ final class EntityExtractor {
                 // Mention persistence failure is non-fatal for the report.
             }
         }
+        return TrackedUsage(usage: tracked.usage, model: tracked.model)
     }
 
     /// Returns deduped, normalized entities. Tries the LLM first; falls
     /// back to a tiny rule-based extractor if the LLM call fails or no
     /// LLM is configured.
     func extract(briefing: BriefingResult) async -> [Extracted] {
+        await extractTracked(briefing: briefing).hits
+    }
+
+    /// Same as `extract` but also returns the LLM call's token usage (nil for
+    /// the rule-based fallback) so the pipeline can fold it into report cost.
+    func extractTracked(briefing: BriefingResult) async -> (hits: [Extracted], usage: LLMUsage?, model: String) {
         if let llm {
             do {
-                let hits = try await llmExtract(briefing: briefing, llm: llm)
-                if !hits.isEmpty { return Self.deduplicate(hits) }
+                let r = try await llmExtractTracked(briefing: briefing, llm: llm)
+                if !r.hits.isEmpty { return (Self.deduplicate(r.hits), r.usage, r.model) }
             } catch {
                 // fall through to rules
             }
         }
-        return Self.deduplicate(Self.ruleBased(briefing: briefing))
+        return (Self.deduplicate(Self.ruleBased(briefing: briefing)), nil, model ?? "")
     }
 
     // MARK: - LLM path
 
-    private func llmExtract(briefing: BriefingResult, llm: LLMClient) async throws -> [Extracted] {
+    private func llmExtractTracked(briefing: BriefingResult, llm: LLMClient) async throws -> (hits: [Extracted], usage: LLMUsage?, model: String) {
         let inputs = briefing.clusters.enumerated().map { idx, c in
             "[c\(idx + 1)] \(c.headline): \(c.summary)"
         }.joined(separator: "\n")
@@ -90,7 +107,8 @@ final class EntityExtractor {
         """
 
         let response = try await llm.summarize(prompt: prompt, model: model)
-        return try Self.parseEnvelope(response.text, clusters: briefing.clusters)
+        let hits = try Self.parseEnvelope(response.text, clusters: briefing.clusters)
+        return (hits, response.usage, response.model)
     }
 
     static func parseEnvelope(_ raw: String, clusters: [BriefingResult.Cluster]) throws -> [Extracted] {

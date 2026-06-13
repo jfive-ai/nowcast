@@ -551,6 +551,32 @@ enum SelfCheck {
                   !FileManager.default.fileExists(atPath: fileURL.path))
         }
 
+        // prod-13: the three formerly-untracked aux LLM calls now report token
+        // usage so the pipeline can fold them into the report's cost.
+        let cpTracked = await CounterpointAgent(llm: MockLLMClient()).annotateTracked(briefing)
+        check("prod-13: counterpoint call reports token usage", cpTracked.usage != nil)
+        let titleTrackedResult = await SmartTitler(llm: MockLLMClient())
+            .titleTracked(topic: topic, tldr: ["a", "b"], clusterHeadlines: clusters.map(\.headline))
+        check("prod-13: smart-title call reports token usage", titleTrackedResult.usage != nil)
+        let entTracked = await EntityExtractor(llm: MockLLMClient()).extractTracked(briefing: briefing)
+        check("prod-13: entity-extraction call reports token usage", entTracked.usage != nil)
+
+        // addReportUsage accrues into a report's running cost totals.
+        let usageProbe = Report(
+            id: UUID(), presetID: nil, topic: "Usage probe \(runID)",
+            window: .today, generatedAt: Date(), markdownPath: "",
+            byteSize: 0, sourceCount: 1, kind: .daily
+        )
+        if let storedUsageProbe = try? storage.insertReport(usageProbe, markdown: "# usage \(runID)\n") {
+            try? storage.addReportUsage(reportID: storedUsageProbe.id, promptTokens: 70, completionTokens: 30, usdCost: 0)
+            let reloaded = (try? storage.listReports())?.first { $0.id == storedUsageProbe.id }
+            check("prod-13: addReportUsage accrues prompt tokens (got \(reloaded?.promptTokens ?? -1))",
+                  reloaded?.promptTokens == 70)
+            check("prod-13: addReportUsage accrues completion tokens",
+                  reloaded?.completionTokens == 30)
+            _ = try? storage.deleteReports(ids: [storedUsageProbe.id])
+        }
+
         lines.append("")
         lines.append("Final: \(passed ? "PASS" : "FAIL")  ·  report id: \(report.id.uuidString.prefix(8))")
         return Result(passed: passed, lines: lines)
