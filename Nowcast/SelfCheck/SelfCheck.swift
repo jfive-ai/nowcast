@@ -475,6 +475,20 @@ enum SelfCheck {
               SecretRedactor.redact("No new items found. Try widening the window.")
                 == "No new items found. Try widening the window.")
 
+        // prod-06: SMTP header/command injection sanitizers strip CR/LF.
+        let injectedSubject = SMTPClient.sanitizeHeaderValue("ETH update\r\nBcc: evil@example.com")
+        check("SMTP: header value strips CR/LF",
+              !injectedSubject.contains("\r") && !injectedSubject.contains("\n"))
+        let injectedAddr = SMTPClient.sanitizeAddress("ok@example.com\r\nRCPT TO:<evil@example.com>")
+        check("SMTP: address strips CR/LF + brackets + whitespace",
+              !injectedAddr.contains("\r") && !injectedAddr.contains("\n")
+              && !injectedAddr.contains("<") && !injectedAddr.contains(">")
+              && !injectedAddr.contains(" "))
+        check("SMTP: clean subject preserved",
+              SMTPClient.sanitizeHeaderValue("Nowcast: ethereum (24h)") == "Nowcast: ethereum (24h)")
+        check("SMTP: clean address preserved",
+              SMTPClient.sanitizeAddress("digest@example.com") == "digest@example.com")
+
         lines.append("")
         lines.append("Final: \(passed ? "PASS" : "FAIL")  ·  report id: \(report.id.uuidString.prefix(8))")
         return Result(passed: passed, lines: lines)
