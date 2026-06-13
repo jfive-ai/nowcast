@@ -485,18 +485,26 @@ final class StorageManager {
     @discardableResult
     func upsertItems(_ items: [RawItem]) throws -> [String: UUID] {
         guard !items.isEmpty else { return [:] }
+        let persistedItems = items.map { PersistedItem(from: $0) }
         return try dbQueue.write { db in
             var result: [String: UUID] = [:]
-            for raw in items {
-                let persisted = PersistedItem(from: raw)
-                if let existing = try Row.fetchOne(db,
-                    sql: "SELECT id FROM item WHERE url_hash = ? LIMIT 1",
-                    arguments: [persisted.urlHash]) {
-                    if let idString: String = existing["id"], let uuid = UUID(uuidString: idString) {
-                        result[persisted.urlHash] = uuid
-                    }
-                    continue
+            // FIX (prod-30): resolve existing ids for ALL input hashes in one
+            // query instead of a per-item SELECT (N+1). New items are inserted;
+            // duplicates within the batch collapse via the `result` map.
+            let hashes = Array(Set(persistedItems.map(\.urlHash)))
+            let placeholders = Array(repeating: "?", count: hashes.count).joined(separator: ",")
+            let existing = try GRDB.Row.fetchAll(db,
+                sql: "SELECT url_hash, id FROM item WHERE url_hash IN (\(placeholders))",
+                arguments: StatementArguments(hashes))
+            for row in existing {
+                if let h: String = row["url_hash"],
+                   let idString: String = row["id"],
+                   let uuid = UUID(uuidString: idString) {
+                    result[h] = uuid
                 }
+            }
+            for persisted in persistedItems {
+                if result[persisted.urlHash] != nil { continue }
                 try db.execute(sql: """
                     INSERT INTO item
                       (id, canonical_url, url_hash, title, snippet, transcript,
@@ -1304,6 +1312,21 @@ final class StorageManager {
             var hostByCanonicalURL: [String: String] = [:]
             for item in items { hostByCanonicalURL[item.url] = item.host }
 
+            // FIX (prod-30): pull ALL cluster feedback in ONE grouped query
+            // instead of one query per cluster (an N+1 that scaled with the
+            // user's cluster history on every popover hover). Index it by
+            // cluster id, then look up in-memory inside the loop.
+            var feedbackByCluster: [String: [String: Int]] = [:]
+            let feedbackRows = try GRDB.Row.fetchAll(db, sql: """
+                SELECT target_id, kind, COUNT(*) AS n FROM feedback
+                WHERE target = 'cluster'
+                GROUP BY target_id, kind
+                """)
+            for r in feedbackRows {
+                guard let tid: String = r["target_id"], let kind: String = r["kind"] else { continue }
+                feedbackByCluster[tid, default: [:]][kind] = r["n"] ?? 0
+            }
+
             for row in clusterRows {
                 guard let cid: String = row["cluster_id"],
                       let citationsJSON: String = row["cit"]
@@ -1312,15 +1335,7 @@ final class StorageManager {
                 let hosts = Set(urls.compactMap { hostByCanonicalURL[$0] })
                 guard !hosts.isEmpty else { continue }
 
-                // Pull this cluster's feedback ONCE.
-                let counts = try GRDB.Row.fetchAll(db, sql: """
-                    SELECT kind, COUNT(*) AS n FROM feedback
-                    WHERE target = 'cluster' AND target_id = ?
-                    GROUP BY kind
-                    """, arguments: [cid])
-                for c in counts {
-                    let kind: String = c["kind"] ?? ""
-                    let n: Int = c["n"] ?? 0
+                for (kind, n) in feedbackByCluster[cid] ?? [:] {
                     for host in hosts {
                         switch kind {
                         case "thumbs_up":     byHost[host, default: Row()].thumbsUp += n

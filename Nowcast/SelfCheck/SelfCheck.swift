@@ -577,6 +577,22 @@ enum SelfCheck {
             _ = try? storage.deleteReports(ids: [storedUsageProbe.id])
         }
 
+        // prod-30: upsertItems batched existence check is idempotent, and
+        // sourceReliability aggregates mentions correctly after the N+1 fix.
+        let dupItem = RawItem(
+            title: "Dup probe \(runID)",
+            url: URL(string: "https://mock.example/\(runID)/dup")!,
+            publishedAt: Date(), snippet: "dup", transcript: nil,
+            sourceKind: .hackerNews, author: nil
+        )
+        let dupMap1 = (try? storage.upsertItems([dupItem])) ?? [:]
+        let dupMap2 = (try? storage.upsertItems([dupItem, dupItem])) ?? [:]
+        check("prod-30: upsertItems returns a stable id for a repeated hash",
+              dupMap1[dupItem.urlHash] != nil && dupMap1[dupItem.urlHash] == dupMap2[dupItem.urlHash])
+        let reliability = (try? storage.sourceReliability()) ?? []
+        check("prod-30: sourceReliability aggregates host mentions (got \(reliability.count) hosts)",
+              reliability.contains { $0.host == "mock.example" && $0.mentions >= 1 })
+
         // prod-10: HTTP retry classification + backoff.
         check("Retry: 429 is transient", HTTPRetry.isTransient(status: 429))
         check("Retry: 503 is transient", HTTPRetry.isTransient(status: 503))
