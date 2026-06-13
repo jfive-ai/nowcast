@@ -153,6 +153,10 @@ final class AppState: ObservableObject {
         do {
             self.storage = try StorageManager()
         } catch {
+            // Leave a breadcrumb in the unified log before crashing so the
+            // failure is diagnosable post-mortem (the fatalError message alone
+            // doesn't always survive into a crash report).
+            Log.storage.critical("Failed to open Nowcast database: \(String(describing: error), privacy: .public)")
             fatalError("Failed to open Nowcast database: \(error)")
         }
 

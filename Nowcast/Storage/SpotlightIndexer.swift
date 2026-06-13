@@ -21,7 +21,7 @@ struct SpotlightIndexer {
         let item = makeItem(report: report, markdown: markdown)
         index.indexSearchableItems([item]) { error in
             if let error {
-                NSLog("Spotlight donate failed: \(error.localizedDescription)")
+                Log.spotlight.error("donate failed: \(error.redactedDescription, privacy: .public)")
             }
         }
     }
@@ -33,7 +33,7 @@ struct SpotlightIndexer {
         let ids = reportIDs.map(\.uuidString)
         index.deleteSearchableItems(withIdentifiers: ids) { error in
             if let error {
-                NSLog("Spotlight remove failed: \(error.localizedDescription)")
+                Log.spotlight.error("remove failed: \(error.redactedDescription, privacy: .public)")
             }
         }
     }
@@ -42,7 +42,7 @@ struct SpotlightIndexer {
     func removeAll(completion: @escaping () -> Void = {}) {
         index.deleteSearchableItems(withDomainIdentifiers: [domain]) { error in
             if let error {
-                NSLog("Spotlight wipe failed: \(error.localizedDescription)")
+                Log.spotlight.error("wipe failed: \(error.redactedDescription, privacy: .public)")
             }
             completion()
         }
@@ -62,7 +62,7 @@ struct SpotlightIndexer {
             guard !items.isEmpty else { return }
             CSSearchableIndex.default().indexSearchableItems(items) { error in
                 if let error {
-                    NSLog("Spotlight reindex failed: \(error.localizedDescription)")
+                    Log.spotlight.error("reindex failed: \(error.redactedDescription, privacy: .public)")
                 }
             }
         }
