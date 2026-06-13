@@ -58,10 +58,16 @@ struct ReportView: View {
 
                     if !clusters.isEmpty {
                         Divider().padding(.top, 8)
-                        Text("Clusters")
-                            .font(.headline)
-                        ForEach(clusters) { cluster in
-                            clusterRow(cluster)
+                        SectionHeader("Clusters", systemImage: "square.stack.3d.up.fill",
+                                      accent: .secondary, tintTitle: false)
+                        ForEach(Array(clusters.enumerated()), id: \.element.id) { idx, cluster in
+                            ClusterCardView(
+                                cluster: cluster,
+                                rank: idx + 1,
+                                feedbackKinds: clusterFeedbackKinds[cluster.id] ?? [],
+                                urlIndex: urlIndex,
+                                onToggle: { kind in toggleClusterFeedback(cluster.id, kind) }
+                            )
                         }
                     }
                 }
@@ -284,19 +290,9 @@ struct ReportView: View {
         } label: {
             Label(kind.displayName, systemImage: kind.symbol)
                 .symbolVariant(active ? .fill : .none)
-                .foregroundStyle(active ? color(for: kind) : .secondary)
+                .foregroundStyle(active ? kind.tint : .secondary)
         }
         .help(kind.displayName)
-    }
-
-    private func color(for kind: Feedback.Kind) -> Color {
-        switch kind {
-        case .thumbsUp:      return .green
-        case .thumbsDown:    return .orange
-        case .hallucination: return .red
-        case .star:          return .yellow
-        case .dismiss:       return .gray
-        }
     }
 
     private func toggleReportFeedback(_ kind: Feedback.Kind) {
@@ -320,64 +316,6 @@ struct ReportView: View {
             set.insert(kind)
         }
         clusterFeedbackKinds[clusterID] = set
-    }
-
-    @ViewBuilder
-    private func clusterRow(_ cluster: BriefingResult.Cluster) -> some View {
-        let kinds = clusterFeedbackKinds[cluster.id] ?? []
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(cluster.headline)
-                    .font(.subheadline).bold()
-                Spacer()
-                clusterButton(cluster.id, kind: .star, active: kinds.contains(.star))
-                clusterButton(cluster.id, kind: .thumbsUp, active: kinds.contains(.thumbsUp))
-                clusterButton(cluster.id, kind: .thumbsDown, active: kinds.contains(.thumbsDown))
-                clusterButton(cluster.id, kind: .dismiss, active: kinds.contains(.dismiss))
-            }
-            Text(cluster.summary)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if let cp = cluster.counterpoint {
-                counterpointRow(symbol: "exclamationmark.triangle", color: .orange, label: "Counter", text: cp)
-            }
-            if let gap = cluster.gap {
-                counterpointRow(symbol: "questionmark.circle", color: .blue, label: "Not covered", text: gap)
-            }
-        }
-        .padding(8)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.secondary.opacity(0.06))
-        )
-    }
-
-    @ViewBuilder
-    private func counterpointRow(symbol: String, color: Color, label: String, text: String) -> some View {
-        HStack(alignment: .top, spacing: 6) {
-            Image(systemName: symbol)
-                .foregroundStyle(color)
-                .font(.caption)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(label).font(.caption2).bold().foregroundStyle(color)
-                Text(text).font(.caption)
-            }
-        }
-        .padding(6)
-        .background(RoundedRectangle(cornerRadius: 4).fill(color.opacity(0.08)))
-    }
-
-    @ViewBuilder
-    private func clusterButton(_ clusterID: String, kind: Feedback.Kind, active: Bool) -> some View {
-        Button {
-            toggleClusterFeedback(clusterID, kind)
-        } label: {
-            Image(systemName: kind.symbol)
-                .symbolVariant(active ? .fill : .none)
-                .foregroundStyle(active ? color(for: kind) : .secondary)
-        }
-        .buttonStyle(.plain)
-        .help(kind.displayName)
     }
 
     // MARK: - Toolbar actions
