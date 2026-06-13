@@ -82,13 +82,43 @@ struct ContentView: View {
     }
 
     private var placeholder: some View {
-        VStack(spacing: 12) {
-            Image(systemName: "doc.text.magnifyingglass")
-                .font(.system(size: 48))
-                .foregroundStyle(.secondary)
-            Text("Generate a briefing or pick one from history.")
-                .foregroundStyle(.secondary)
+        VStack(spacing: Theme.Spacing.lg) {
+            ZStack {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.12))
+                    .frame(width: 92, height: 92)
+                Image(systemName: "newspaper")
+                    .font(.system(size: 38, weight: .light))
+                    .foregroundStyle(Color.accentColor)
+            }
+            VStack(spacing: Theme.Spacing.xs + 2) {
+                Text("No briefing selected")
+                    .font(.title3.bold())
+                Text("Pick a topic above to generate a fresh briefing, or open one from your history on the left.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 360)
+            }
+            HStack(spacing: Theme.Spacing.xl) {
+                hint(icon: "sparkles", text: "Generate")
+                hint(icon: "clock.arrow.circlepath", text: "History")
+                hint(icon: "magnifyingglass", text: "Search")
+            }
+            .padding(.top, Theme.Spacing.xs)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(40)
+    }
+
+    private func hint(icon: String, text: String) -> some View {
+        VStack(spacing: Theme.Spacing.xs) {
+            Image(systemName: icon)
+                .font(.title3)
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
     }
 }

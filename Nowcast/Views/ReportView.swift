@@ -20,10 +20,14 @@ struct ReportView: View {
     @State private var followUps: [FollowUpSuggester.Suggestion] = []
     @State private var presetDraft: TopicPreset?
     @State private var sentimentTrendOpen: Bool = false
+    /// False until the brief's markdown/clusters have loaded from disk; gates
+    /// the skeleton placeholder so content doesn't pop in from blank (V9).
+    @State private var loaded: Bool = false
 
     var body: some View {
         HSplitView {
             ScrollView {
+                if loaded {
                 VStack(alignment: .leading, spacing: 12) {
                     ReportHeaderView(report: report)
 
@@ -73,6 +77,9 @@ struct ReportView: View {
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    ReportSkeletonView()
+                }
             }
 
             if chatOpen, let session = chatHolder.session {
@@ -95,6 +102,11 @@ struct ReportView: View {
             // P6-1: build a URL → PersistedItem map for citation hover popovers.
             let items = state.itemsForReport(report.id)
             urlIndex = MarkdownLinkText.buildIndex(items: items)
+            // Core content (markdown, clusters, citations) is ready — swap the
+            // skeleton for the real layout. NB: keep this before the first
+            // `await` below; the loads above are synchronous, so there's no
+            // cancellation window that could leave the skeleton stuck.
+            loaded = true
             // P6-2: build the provenance rows for the drawer.
             provenanceRows = ProvenanceBuilder.build(clusters: clusters, items: items)
             // P6-4: kick off follow-up suggestions in the background; the
