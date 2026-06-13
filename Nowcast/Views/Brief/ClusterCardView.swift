@@ -12,6 +12,7 @@ struct ClusterCardView: View {
     let onToggle: (Feedback.Kind) -> Void
 
     @State private var hovering = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private static let feedbackButtons: [Feedback.Kind] = [.star, .thumbsUp, .thumbsDown, .dismiss]
 
@@ -39,7 +40,7 @@ struct ClusterCardView: View {
             }
         }
         .onHover { hovering = $0 }
-        .animation(Theme.Motion.quick, value: hovering)
+        .animation(reduceMotion ? nil : Theme.Motion.quick, value: hovering)
     }
 
     private var header: some View {
