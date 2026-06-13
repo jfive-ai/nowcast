@@ -201,6 +201,16 @@ final class AppState: ObservableObject {
         self.ollamaBaseURL = UserDefaults.standard.string(forKey: Self.ollamaBaseURLKey)
             ?? Self.defaultOllamaBaseURL
 
+        // Everything below is live launch orchestration. SelfCheck builds
+        // its own MockLLMClient pipeline and only needs `storage`, so the
+        // headless gate skips all of it: building a live pipeline (Ollama
+        // needs no key, so blanking keys alone wouldn't prevent a real
+        // client), retention pruning, the scheduler, the launch-time
+        // weekly-digest synthesis (a real LLM call + DB inserts), Spotlight
+        // reindex, and the embedding / big-story backfills. This keeps the
+        // gate hermetic and side-effect-free regardless of the saved
+        // provider.
+        guard !headlessSelfCheck else { return }
 
         rebuildPipeline()
         applyRetention()
@@ -215,9 +225,7 @@ final class AppState: ObservableObject {
             self?.selectedReportID = reportID
             self?.markRead(reportID: reportID)
         }
-        if !headlessSelfCheck {
-            Task { await NotificationManager.shared.requestAuthorization() }
-        }
+        Task { await NotificationManager.shared.requestAuthorization() }
 
         // Rebuild the Spotlight index from the current report set so it
         // matches reality even if the user pruned reports while the app
