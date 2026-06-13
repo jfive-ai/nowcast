@@ -65,7 +65,7 @@ struct ReportView: View {
 
                     Divider()
 
-                    BriefMarkdownView(markdown: markdown, urlIndex: urlIndex)
+                    BriefBodyView(markdown: markdown, urlIndex: urlIndex)
                         .textSelection(.enabled)
 
                     if !clusters.isEmpty {

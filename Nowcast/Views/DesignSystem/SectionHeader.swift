@@ -8,14 +8,20 @@ struct SectionHeader: View {
     var systemImage: String?
     var accent: Color?
     var trailingText: String?
+    /// When false, the title stays `.primary` even if `accent` is set (the
+    /// accent still tints the icon). Lets a standard card have a colored glyph
+    /// but a calm, neutral title.
+    var tintTitle: Bool
 
     init(_ title: String,
          systemImage: String? = nil,
          accent: Color? = nil,
+         tintTitle: Bool = true,
          trailingText: String? = nil) {
         self.title = title
         self.systemImage = systemImage
         self.accent = accent
+        self.tintTitle = tintTitle
         self.trailingText = trailingText
     }
 
@@ -28,7 +34,7 @@ struct SectionHeader: View {
             }
             Text(title)
                 .font(.headline)
-                .foregroundStyle(accent ?? .primary)
+                .foregroundStyle((tintTitle ? accent : nil) ?? .primary)
             Spacer(minLength: 0)
             if let trailingText {
                 Text(trailingText)
