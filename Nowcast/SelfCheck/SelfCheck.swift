@@ -430,6 +430,36 @@ enum SelfCheck {
             lines.append("• P8-1: NLEmbedding unavailable on this build — semantic-search assertions skipped")
         }
 
+        // prod-03: outbound URL policy blocks SSRF targets but allows public hosts.
+        check("SSRF: public https host allowed",
+              OutboundURLPolicy.allows(URL(string: "https://example.com/feed.xml")!))
+        check("SSRF: file:// scheme blocked",
+              !OutboundURLPolicy.allows(URL(string: "file:///etc/passwd")!))
+        check("SSRF: localhost blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://localhost:8080/")!))
+        check("SSRF: loopback 127.0.0.1 blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://127.0.0.1/")!))
+        check("SSRF: cloud metadata 169.254.169.254 blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://169.254.169.254/latest/meta-data/")!))
+        check("SSRF: private 10/8 blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://10.1.2.3/")!))
+        check("SSRF: private 192.168/16 blocked",
+              !OutboundURLPolicy.allows(URL(string: "https://192.168.1.1/")!))
+        check("SSRF: .local mDNS name blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://printer.local/feed")!))
+        check("SSRF: trailing-dot localhost. blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://localhost./")!))
+        check("SSRF: trailing-dot printer.local. blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://printer.local./feed")!))
+        check("SSRF: localhost.localdomain blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://localhost.localdomain/")!))
+        check("SSRF: IPv6 loopback ::1 blocked",
+              OutboundURLPolicy.isBlocked(ipv6: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]))
+        check("SSRF: IPv6 link-local fe80 blocked",
+              OutboundURLPolicy.isBlocked(ipv6: [0xfe,0x80,0,0,0,0,0,0,0,0,0,0,0,0,0,1]))
+        check("SSRF: IPv6 public 2606:: allowed",
+              !OutboundURLPolicy.isBlocked(ipv6: [0x26,0x06,0,0,0,0,0,0,0,0,0,0,0,0,0,1]))
+
         lines.append("")
         lines.append("Final: \(passed ? "PASS" : "FAIL")  ·  report id: \(report.id.uuidString.prefix(8))")
         return Result(passed: passed, lines: lines)

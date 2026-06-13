@@ -16,7 +16,7 @@ struct NitterAdapter: SourceAdapter {
     private let session: URLSession
     private let mirrorStore: NitterMirrorStore
 
-    init(mirrorStore: NitterMirrorStore, session: URLSession = .shared) {
+    init(mirrorStore: NitterMirrorStore, session: URLSession = OutboundURLPolicy.guardedSession) {
         self.session = session
         self.mirrorStore = mirrorStore
     }
@@ -51,7 +51,8 @@ struct NitterAdapter: SourceAdapter {
 
     private func fetchHandle(handle: String, mirrors: [String], cutoff: Date) async -> [RawItem] {
         for base in mirrors {
-            guard let url = URL(string: "\(base)/\(handle)/rss") else { continue }
+            guard let url = URL(string: "\(base)/\(handle)/rss"),
+                  OutboundURLPolicy.allows(url) else { continue }
             do {
                 let items = try await fetchRSS(from: url, cutoff: cutoff)
                 if !items.isEmpty {
