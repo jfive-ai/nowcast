@@ -672,7 +672,7 @@ final class AppState: ObservableObject {
         do {
             try await sender.send(report: report, markdown: markdown)
         } catch {
-            lastError = "Email digest failed: \(error.localizedDescription)"
+            lastError = "Email digest failed: \(error.redactedDescription)"
         }
     }
 

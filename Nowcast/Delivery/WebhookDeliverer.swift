@@ -143,7 +143,9 @@ struct WebhookDeliverer {
             let status = (response as? HTTPURLResponse)?.statusCode
             return Outcome(status: status, errorMessage: nil)
         } catch {
-            return Outcome(status: nil, errorMessage: error.localizedDescription)
+            // Redacted: webhook URLs (Slack/Discord) carry a secret path token
+            // that URLSession errors can echo back.
+            return Outcome(status: nil, errorMessage: error.redactedDescription)
         }
     }
 
