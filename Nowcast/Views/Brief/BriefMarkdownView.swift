@@ -172,17 +172,9 @@ private struct CitationChipButton: View {
 
     var body: some View {
         Link(destination: URL(string: url) ?? URL(string: "about:blank")!) {
-            HStack(spacing: 3) {
-                Image(systemName: symbol)
-                    .font(.caption2)
-                    .foregroundStyle(tint)
-                Text(host)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(tint.opacity(0.10))
-            .clipShape(Capsule())
+            // Shared design-system Chip so inline citations match the cluster
+            // host chips (V6) exactly.
+            Chip(host, systemImage: symbol, tint: tint)
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
