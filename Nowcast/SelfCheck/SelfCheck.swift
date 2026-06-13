@@ -496,6 +496,46 @@ enum SelfCheck {
         check("Indexes: report(kind) exists",
               reportIndexes.contains("report_on_kind"))
 
+        // prod-11: deleting a report prunes now-orphaned item rows + item_fts;
+        // deleting a preset prunes its seen_item rows.
+        let orphanItem = RawItem(
+            title: "Orphan probe \(runID)",
+            url: URL(string: "https://mock.example/\(runID)/orphan")!,
+            publishedAt: Date(),
+            snippet: "orphan probe",
+            transcript: nil,
+            sourceKind: .hackerNews,
+            author: nil
+        )
+        let orphanIDMap = (try? storage.upsertItems([orphanItem])) ?? [:]
+        let throwaway = Report(
+            id: UUID(), presetID: nil, topic: "Orphan report \(runID)",
+            window: .today, generatedAt: Date(), markdownPath: "",
+            byteSize: 0, sourceCount: 1, kind: .daily
+        )
+        if let storedThrowaway = try? storage.insertReport(throwaway, markdown: "# orphan\n") {
+            try? storage.attachItemsToReport(
+                storedThrowaway.id,
+                itemIDsByHash: orphanIDMap,
+                freshHashes: Set(orphanIDMap.keys)
+            )
+            check("prod-11: orphan item exists before its report is deleted",
+                  (try? storage.itemExists(urlHash: orphanItem.urlHash)) == true)
+            _ = try? storage.deleteReports(ids: [storedThrowaway.id])
+            check("prod-11: orphaned item pruned after its only report is deleted",
+                  (try? storage.itemExists(urlHash: orphanItem.urlHash)) == false)
+        }
+        let seenProbePreset = TopicPreset(
+            name: "Seen probe \(runID)", query: "seen probe", sources: [.hackerNews]
+        )
+        try? storage.upsertPreset(seenProbePreset)
+        try? storage.recordSeen([orphanItem], presetID: seenProbePreset.id)
+        check("prod-11: seen_item recorded for preset before delete",
+              ((try? storage.seenItemCount(presetID: seenProbePreset.id)) ?? 0) >= 1)
+        try? storage.deletePreset(id: seenProbePreset.id)
+        check("prod-11: seen_item pruned when its preset is deleted",
+              (try? storage.seenItemCount(presetID: seenProbePreset.id)) == 0)
+
         lines.append("")
         lines.append("Final: \(passed ? "PASS" : "FAIL")  ·  report id: \(report.id.uuidString.prefix(8))")
         return Result(passed: passed, lines: lines)

@@ -230,10 +230,19 @@ final class StorageManager {
                 sql: "DELETE FROM report_fts WHERE report_id IN (\(placeholders))",
                 arguments: StatementArguments(ids)
             )
-            // Items belonging only to deleted reports should also be
-            // pruned from item_fts. Items remain in `item` (cascade
-            // doesn't cover the FTS table), so we drop their FTS rows
-            // when the join leaves no parent report.
+            // Delete the reports FIRST so the `report_item` cascade fires;
+            // only then can we tell which `item` rows are truly orphaned.
+            // (Previously the orphan cleanup ran *before* this delete, so the
+            // still-present report_item links made nothing look orphaned and
+            // item / item_fts rows leaked.)
+            try db.execute(
+                sql: "DELETE FROM report WHERE id IN (\(placeholders))",
+                arguments: StatementArguments(ids)
+            )
+            // prod-11: an `item` (and its item_fts shadow row) that no longer
+            // belongs to ANY report is dead weight — neither cascades from
+            // report deletion. The seen-index lives in a separate table, so
+            // dropping the item row doesn't affect dedup.
             try db.execute(sql: """
                 DELETE FROM item_fts
                 WHERE item_id IN (
@@ -243,11 +252,33 @@ final class StorageManager {
                     )
                 )
                 """)
-            try db.execute(
-                sql: "DELETE FROM report WHERE id IN (\(placeholders))",
-                arguments: StatementArguments(ids)
-            )
+            try db.execute(sql: """
+                DELETE FROM item
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM report_item ri WHERE ri.item_id = item.id
+                )
+                """)
         }
+    }
+
+    /// Delete specific reports by id (History context menu, self-check).
+    /// Returns the ids actually found and deleted. Prunes now-orphaned items.
+    @discardableResult
+    func deleteReports(ids: [UUID]) throws -> [UUID] {
+        guard !ids.isEmpty else { return [] }
+        let idStrings = ids.map(\.uuidString)
+        let reports = try dbQueue.read { db -> [Report] in
+            let placeholders = Array(repeating: "?", count: idStrings.count).joined(separator: ",")
+            return try Row.fetchAll(db, sql: """
+                SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title,
+                       big_story_score, big_story_headline, sentiment, sentiment_rationale
+                FROM report
+                WHERE id IN (\(placeholders))
+                """, arguments: StatementArguments(idStrings)).compactMap(Self.makeReport)
+        }
+        try delete(reports: reports)
+        return reports.map(\.id)
     }
 
     /// Re-populate `report_fts` and `item_fts` from the canonical tables
@@ -354,6 +385,14 @@ final class StorageManager {
         try dbQueue.write { db in
             try db.execute(
                 sql: "DELETE FROM topic_preset WHERE id = ?",
+                arguments: [id.uuidString]
+            )
+            // prod-11: drop this preset's seen-index rows so they don't leak
+            // until the 90-day age-out (and a future preset reusing this id
+            // doesn't inherit a stale seen set). report.preset_id is
+            // ON DELETE SET NULL, so existing reports survive as ad-hoc.
+            try db.execute(
+                sql: "DELETE FROM seen_item WHERE preset_id = ?",
                 arguments: [id.uuidString]
             )
         }
@@ -1335,6 +1374,23 @@ final class StorageManager {
                     VALUES (?, ?, ?)
                     """, arguments: [presetKey, item.urlHash, now])
             }
+        }
+    }
+
+    /// Whether an `item` row with the given URL hash currently exists.
+    /// (Diagnostics / self-check for orphan pruning.)
+    func itemExists(urlHash: String) throws -> Bool {
+        try dbQueue.read { db in
+            try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM item WHERE url_hash = ?)",
+                              arguments: [urlHash]) ?? false
+        }
+    }
+
+    /// Count of `seen_item` rows recorded for a preset. (Diagnostics / self-check.)
+    func seenItemCount(presetID: UUID) throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM seen_item WHERE preset_id = ?",
+                             arguments: [presetID.uuidString]) ?? 0
         }
     }
 
