@@ -489,6 +489,13 @@ enum SelfCheck {
         check("SMTP: clean address preserved",
               SMTPClient.sanitizeAddress("digest@example.com") == "digest@example.com")
 
+        // prod-08: v17 report indexes were actually created.
+        let reportIndexes = (try? storage.indexNames(onTable: "report")) ?? []
+        check("Indexes: report(preset_id, generated_at) exists (got \(reportIndexes.count) total)",
+              reportIndexes.contains("report_on_preset_generated"))
+        check("Indexes: report(kind) exists",
+              reportIndexes.contains("report_on_kind"))
+
         lines.append("")
         lines.append("Final: \(passed ? "PASS" : "FAIL")  ·  report id: \(report.id.uuidString.prefix(8))")
         return Result(passed: passed, lines: lines)

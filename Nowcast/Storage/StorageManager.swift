@@ -14,6 +14,18 @@ final class StorageManager {
         try Schema.migrator().migrate(dbQueue)
     }
 
+    /// Names of all indexes on `table`. Used by the self-check to assert
+    /// migrations actually created their indexes (not just that they ran).
+    func indexNames(onTable table: String) throws -> [String] {
+        try dbQueue.read { db in
+            try String.fetchAll(
+                db,
+                sql: "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ?",
+                arguments: [table]
+            )
+        }
+    }
+
     // MARK: - Reports
 
     func insertReport(_ report: Report, markdown: String) throws -> Report {
