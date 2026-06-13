@@ -13,7 +13,7 @@ struct BriefMarkdownView: View {
 
     init(markdown: String,
          urlIndex: [String: PersistedItem] = [:],
-         lineSpacing: CGFloat = 3) {
+         lineSpacing: CGFloat = 5) {
         self.blocks = BriefMarkdown.parse(markdown)
         self.urlIndex = urlIndex
         self.lineSpacing = lineSpacing
@@ -120,7 +120,7 @@ struct BriefMarkdownView: View {
 struct BriefInlineText: View {
     let line: String
     var urlIndex: [String: PersistedItem] = [:]
-    var lineSpacing: CGFloat = 3
+    var lineSpacing: CGFloat = 5
 
     var body: some View {
         if line.contains("](") {
