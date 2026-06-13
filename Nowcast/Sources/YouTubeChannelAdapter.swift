@@ -88,7 +88,6 @@ struct YouTubeChannelAdapter: SourceAdapter {
         c.path = "/youtube/v3/channels"
         var items: [URLQueryItem] = [
             URLQueryItem(name: "part", value: "contentDetails"),
-            URLQueryItem(name: "key", value: apiKey),
         ]
         switch normalized {
         case .id(let id):     items.append(URLQueryItem(name: "id", value: id))
@@ -99,6 +98,7 @@ struct YouTubeChannelAdapter: SourceAdapter {
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
+        request.setValue(apiKey, forHTTPHeaderField: "X-Goog-Api-Key")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw SourceError.requestFailed(kind: .youtubeChannel)
@@ -116,12 +116,12 @@ struct YouTubeChannelAdapter: SourceAdapter {
             URLQueryItem(name: "part", value: "snippet,contentDetails"),
             URLQueryItem(name: "playlistId", value: playlistId),
             URLQueryItem(name: "maxResults", value: String(maxVideosPerChannel)),
-            URLQueryItem(name: "key", value: apiKey),
         ]
         guard let url = c.url else { return [] }
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
+        request.setValue(apiKey, forHTTPHeaderField: "X-Goog-Api-Key")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw SourceError.requestFailed(kind: .youtubeChannel)

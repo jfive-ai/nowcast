@@ -460,6 +460,21 @@ enum SelfCheck {
         check("SSRF: IPv6 public 2606:: allowed",
               !OutboundURLPolicy.isBlocked(ipv6: [0x26,0x06,0,0,0,0,0,0,0,0,0,0,0,0,0,1]))
 
+        // prod-05: secret redaction scrubs keys/tokens from error strings.
+        check("Redact: ?key= query param scrubbed",
+              SecretRedactor.redact("GET https://www.googleapis.com/x?part=snippet&key=AIzaSyD1234567890abc failed")
+                .contains("key=***")
+              && !SecretRedactor.redact("a?key=AIzaSyD1234567890abc").contains("AIzaSyD1234567890abc"))
+        check("Redact: bare Google AIza key scrubbed",
+              !SecretRedactor.redact("error with AIzaSyD1234567890abcDEF in it").contains("AIzaSyD1234567890abcDEF"))
+        check("Redact: OpenAI sk- token scrubbed",
+              !SecretRedactor.redact("auth sk-abc123def456ghi789 rejected").contains("sk-abc123def456ghi789"))
+        check("Redact: Bearer token scrubbed",
+              SecretRedactor.redact("Authorization: Bearer abc.def.ghi").contains("Bearer ***"))
+        check("Redact: leaves ordinary text intact",
+              SecretRedactor.redact("No new items found. Try widening the window.")
+                == "No new items found. Try widening the window.")
+
         lines.append("")
         lines.append("Final: \(passed ? "PASS" : "FAIL")  ·  report id: \(report.id.uuidString.prefix(8))")
         return Result(passed: passed, lines: lines)

@@ -126,7 +126,9 @@ final class ReportPipeline {
                                 items: [],
                                 startedAt: started,
                                 finishedAt: Date(),
-                                errorMessage: error.localizedDescription
+                                // Redacted: this string is persisted to
+                                // source_run and shown in the Health panel.
+                                errorMessage: error.redactedDescription
                             )
                         }
                     }
