@@ -5,6 +5,17 @@ struct NowcastApp: App {
     @StateObject private var state = AppState()
     @StateObject private var audioPlayer = AudioBriefPlayer()
 
+    init() {
+        #if DEBUG
+        // CI / headless regression gate. Runs before any scene is built and
+        // never returns — `@StateObject` defers `AppState()` construction
+        // until the scene body is evaluated, so nothing else spins up here.
+        if HeadlessSelfCheck.isRequested {
+            HeadlessSelfCheck.runAndExit()
+        }
+        #endif
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
