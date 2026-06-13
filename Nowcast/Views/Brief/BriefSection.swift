@@ -124,7 +124,7 @@ enum BriefSectionizer {
         if t.contains("what's new") || t.contains("whats new") || t.contains("what changed") { return .whatsNew }
         if t.contains("to watch") { return .watch }
         if t.contains("storyline") || t.contains("stories") { return .stories }
-        if t.hasPrefix("signal") { return .signal }
+        if t.contains("signal") { return .signal }
         if t.contains("source") { return .sources }   // after the "disagree" check
         return .generic
     }

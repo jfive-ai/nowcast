@@ -3,8 +3,8 @@ import SwiftUI
 /// Renders a brief's markdown as a stack of classified, themed sections instead
 /// of one flat blob. The TL;DR is pulled to the top ("answer first") and given
 /// a hero callout; "Sources disagree" / "What's new" get accent callouts; the
-/// rest render as standard cards. Used by `ReportView` (and `CompareReportsView`
-/// from V12).
+/// rest render as standard cards. Hosted by `ReportView`; the compare view (V12)
+/// is expected to adopt it too.
 struct BriefBodyView: View {
     let markdown: String
     var urlIndex: [String: PersistedItem] = [:]
