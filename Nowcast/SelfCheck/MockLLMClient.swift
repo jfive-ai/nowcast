@@ -99,69 +99,6 @@ struct MockLLMClient: LLMClient {
         return urls
     }
 
-    /// Fixed-URL fallback used only when no inputs are present in the prompt.
-    static let cannedBrief: String = """
-    ## TL;DR
-    - Mock cluster A captured.
-    - Mock cluster B captured.
-    - No-op signal section.
-
-    ## Stories
-
-    ### Mock cluster A
-    A short summary of the first synthetic cluster. Numbers: $42 outflows.
-
-    Sources:
-    - [Item one](https://mock.example/one)
-
-    ### Mock cluster B
-    A short summary of the second synthetic cluster.
-
-    Sources:
-    - [Item two](https://mock.example/two)
-
-    ## Signal
-    Synthetic signal for self-check.
-
-    ## Sources
-    - Hacker News
-      - [Item one](https://mock.example/one)
-      - [Item two](https://mock.example/two)
-
-    <!-- briefing-json -->
-    ```json
-    {
-      "tldr": [
-        "Mock cluster A captured.",
-        "Mock cluster B captured.",
-        "No-op signal section."
-      ],
-      "clusters": [
-        {
-          "id": "c1",
-          "headline": "Mock cluster A",
-          "summary": "A short summary of the first synthetic cluster.",
-          "claims": [
-            { "text": "Outflows totaled $42.", "citations": ["https://mock.example/one"] }
-          ],
-          "citations": ["https://mock.example/one"]
-        },
-        {
-          "id": "c2",
-          "headline": "Mock cluster B",
-          "summary": "A short summary of the second synthetic cluster.",
-          "claims": [
-            { "text": "Pectra activation window confirmed.", "citations": ["https://mock.example/two"] }
-          ],
-          "citations": ["https://mock.example/two"]
-        }
-      ],
-      "signal": "Synthetic signal for self-check.",
-      "low_confidence": false
-    }
-    ```
-    """
-
     static let cannedSubQueriesEnvelope: String = """
     {"subQueries": ["sub query one", "sub query two", "sub query three"]}
     """
