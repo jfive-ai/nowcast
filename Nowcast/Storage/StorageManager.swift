@@ -215,12 +215,13 @@ final class StorageManager {
     }
 
     private func delete(reports: [Report]) throws {
-        for r in reports {
-            let url = AppPaths.reportURL(for: r.markdownPath)
-            try? FileManager.default.removeItem(at: url)
-        }
         let ids = reports.map(\.id.uuidString)
         guard !ids.isEmpty else { return }
+        // prod-12: commit the DB delete FIRST, then remove the markdown files.
+        // If the write throws (and rolls back), the rows — and their
+        // markdown_path — survive, so we never strand a report row pointing at
+        // a file we already deleted. Files orphaned by a later crash are
+        // harmless (and reclaimable); a row pointing at a missing file is not.
         try dbQueue.write { db in
             let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
             // FIX (codex review PR #42): purge FTS shadow rows when their
@@ -258,6 +259,10 @@ final class StorageManager {
                     SELECT 1 FROM report_item ri WHERE ri.item_id = item.id
                 )
                 """)
+        }
+        // DB committed — now it's safe to remove the markdown files.
+        for r in reports {
+            try? FileManager.default.removeItem(at: AppPaths.reportURL(for: r.markdownPath))
         }
     }
 
