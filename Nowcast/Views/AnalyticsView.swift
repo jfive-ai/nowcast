@@ -130,20 +130,4 @@ struct AnalyticsView: View {
         funnel = (try? repo.freshnessFunnel()) ?? []
     }
 }
-
-private struct Card<Content: View>: View {
-    let title: String
-    @ViewBuilder var content: Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title).font(.headline)
-            content
-        }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.secondary.opacity(0.06))
-        )
-    }
-}
+// Card now lives in Views/DesignSystem/Card.swift (V1) — shared across the app.
