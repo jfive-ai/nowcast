@@ -427,43 +427,11 @@ struct ReportView: View {
     }
 
     private var sentimentIndicator: some View {
-        let sentiment = report.sentiment ?? 0
-        let pct = (sentiment + 1) / 2  // map -1..1 → 0..1
-        let label: String = {
-            if sentiment > 0.25 { return "Bullish" }
-            if sentiment < -0.25 { return "Bearish" }
-            return "Neutral"
-        }()
-        let color: Color = sentiment > 0.25 ? .green : (sentiment < -0.25 ? .red : .secondary)
-        return HStack(spacing: 10) {
-            Text("Coverage tone").font(.caption).foregroundStyle(.secondary)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.gray.opacity(0.18)).frame(height: 4)
-                    Circle()
-                        .fill(color)
-                        .frame(width: 8, height: 8)
-                        .offset(x: max(0, min(geo.size.width - 8, geo.size.width * pct - 4)))
-                }
-            }
-            .frame(height: 8)
-            Text(label)
-                .font(.caption.bold())
-                .foregroundStyle(color)
-                .frame(width: 60, alignment: .leading)
-            if report.presetID != nil {
-                Button {
-                    sentimentTrendOpen = true
-                } label: {
-                    Label("Trend", systemImage: "chart.line.uptrend.xyaxis")
-                        .labelStyle(.iconOnly)
-                        .font(.caption)
-                }
-                .buttonStyle(.borderless)
-                .help("Show sentiment trend for this preset")
-            }
-        }
-        .help(report.sentimentRationale ?? label)
+        SentimentGauge(
+            sentiment: report.sentiment ?? 0,
+            rationale: report.sentimentRationale,
+            onTrend: report.presetID != nil ? { sentimentTrendOpen = true } : nil
+        )
     }
 
     private var bigStoryBanner: some View {
