@@ -9,7 +9,7 @@ struct RSSAdapter: SourceAdapter {
 
     private let session: URLSession
 
-    init(session: URLSession = .shared) {
+    init(session: URLSession = OutboundURLPolicy.guardedSession) {
         self.session = session
     }
 
@@ -19,6 +19,7 @@ struct RSSAdapter: SourceAdapter {
         let feeds = subscriptions
             .filter { $0.kind == .rss }
             .compactMap { sub -> URL? in URL(string: sub.identifier) }
+            .filter(OutboundURLPolicy.allows)   // drop SSRF targets (localhost, LAN, metadata)
         guard !feeds.isEmpty else { return [] }
 
         let cutoff = window.earliestDate
