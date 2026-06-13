@@ -103,7 +103,9 @@ struct ReportView: View {
             let items = state.itemsForReport(report.id)
             urlIndex = MarkdownLinkText.buildIndex(items: items)
             // Core content (markdown, clusters, citations) is ready — swap the
-            // skeleton for the real layout.
+            // skeleton for the real layout. NB: keep this before the first
+            // `await` below; the loads above are synchronous, so there's no
+            // cancellation window that could leave the skeleton stuck.
             loaded = true
             // P6-2: build the provenance rows for the drawer.
             provenanceRows = ProvenanceBuilder.build(clusters: clusters, items: items)
