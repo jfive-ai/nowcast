@@ -24,14 +24,19 @@ enum OutboundURLPolicy {
         guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" else {
             return "Only http and https URLs are allowed."
         }
-        guard let host = url.host, !host.isEmpty else {
+        guard let rawHost = url.host, !rawHost.isEmpty else {
             return "URL has no host."
         }
-        let lowerHost = host.lowercased()
-        if lowerHost == "localhost"
-            || lowerHost.hasSuffix(".localhost")
-            || lowerHost.hasSuffix(".local")
-            || lowerHost.hasSuffix(".internal") {
+        // `URL.host` preserves a trailing FQDN-root dot ("localhost." ,
+        // "printer.local."), which resolves identically but slips past naive
+        // suffix/equality checks. Normalize before matching.
+        var host = rawHost.lowercased()
+        while host.hasSuffix(".") { host.removeLast() }
+        if host == "localhost"
+            || host == "localhost.localdomain"
+            || host.hasSuffix(".localhost")
+            || host.hasSuffix(".local")
+            || host.hasSuffix(".internal") {
             return "Local or internal hostnames are not allowed."
         }
         if let v4 = IPv4Address(host), isBlocked(ipv4: [UInt8](v4.rawValue)) {

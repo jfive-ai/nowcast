@@ -447,6 +447,12 @@ enum SelfCheck {
               !OutboundURLPolicy.allows(URL(string: "https://192.168.1.1/")!))
         check("SSRF: .local mDNS name blocked",
               !OutboundURLPolicy.allows(URL(string: "http://printer.local/feed")!))
+        check("SSRF: trailing-dot localhost. blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://localhost./")!))
+        check("SSRF: trailing-dot printer.local. blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://printer.local./feed")!))
+        check("SSRF: localhost.localdomain blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://localhost.localdomain/")!))
         check("SSRF: IPv6 loopback ::1 blocked",
               OutboundURLPolicy.isBlocked(ipv6: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]))
         check("SSRF: IPv6 link-local fe80 blocked",
