@@ -3,6 +3,7 @@ import SwiftUI
 struct HistoryView: View {
     @EnvironmentObject private var state: AppState
     @Binding var selectedReport: Report?
+    @State private var reportPendingDelete: Report?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -22,9 +23,32 @@ struct HistoryView: View {
                 ForEach(state.reports, id: \.self) { report in
                     HistoryRow(report: report, isBigStory: state.isBigStory(report))
                         .tag(Optional(report))
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                reportPendingDelete = report
+                            } label: {
+                                Label("Delete Brief…", systemImage: "trash")
+                            }
+                        }
                 }
             }
             .listStyle(.sidebar)
+        }
+        .confirmationDialog(
+            "Delete this brief?",
+            isPresented: Binding(
+                get: { reportPendingDelete != nil },
+                set: { if !$0 { reportPendingDelete = nil } }
+            ),
+            presenting: reportPendingDelete
+        ) { report in
+            Button("Delete", role: .destructive) {
+                state.deleteReport(report)
+                reportPendingDelete = nil
+            }
+            Button("Cancel", role: .cancel) { reportPendingDelete = nil }
+        } message: { report in
+            Text("“\(report.displayTitle)” and its markdown file will be permanently removed. This can't be undone.")
         }
     }
 }
