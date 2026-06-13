@@ -20,6 +20,7 @@ struct AnalyticsView: View {
                     Text("Last 30 days").font(.caption).foregroundStyle(.secondary)
                     Button(action: refresh) { Image(systemName: "arrow.clockwise") }
                         .buttonStyle(.borderless)
+                        .accessibilityLabel("Refresh")
                 }
 
                 if isEmpty {
@@ -45,6 +46,7 @@ struct AnalyticsView: View {
             Image(systemName: "chart.bar.doc.horizontal")
                 .font(.largeTitle)
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             Text("No data yet")
                 .font(.headline)
             Text("Generate a few reports to see usage trends.")

@@ -31,6 +31,7 @@ struct SectionHeader: View {
                 Image(systemName: systemImage)
                     .font(.subheadline)
                     .foregroundStyle(accent ?? .secondary)
+                    .accessibilityHidden(true)
             }
             Text(title)
                 .font(.headline)

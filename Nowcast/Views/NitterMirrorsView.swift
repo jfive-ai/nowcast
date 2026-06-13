@@ -45,6 +45,7 @@ struct NitterMirrorsView: View {
                                 Image(systemName: "trash")
                             }
                             .buttonStyle(.borderless)
+                            .accessibilityLabel("Delete mirror")
                         }
                     }
                 }

@@ -81,6 +81,7 @@ struct SearchView: View {
             Image(systemName: mode == .keyword ? "magnifyingglass" : "wand.and.stars")
                 .font(.title)
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             Text(mode == .keyword
                  ? "Search across every report"
                  : "Find briefs by meaning")
@@ -100,6 +101,7 @@ struct SearchView: View {
             Image(systemName: "exclamationmark.bubble")
                 .font(.title)
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             Text("Semantic search unavailable")
                 .font(.headline)
             Text("This macOS build didn't ship an English sentence model. Use Keyword instead.")
@@ -116,6 +118,7 @@ struct SearchView: View {
             Image(systemName: "questionmark.circle")
                 .font(.title)
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             Text("No matches")
                 .font(.headline)
             Text(mode == .keyword

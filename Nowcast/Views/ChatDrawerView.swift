@@ -81,6 +81,8 @@ struct ChatDrawerView: View {
             Button(action: send) {
                 Image(systemName: "paperplane.fill")
             }
+            .accessibilityLabel("Send")
+            .accessibilityHint("Sends your follow-up question")
             .keyboardShortcut(.return, modifiers: .command)
             .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || session.isThinking)
             .help("Send (⌘↩)")
@@ -103,6 +105,7 @@ struct ChatDrawerView: View {
                     HStack {
                         Image(systemName: "sparkles")
                             .foregroundStyle(.secondary)
+                            .accessibilityHidden(true)
                         Text(ex)
                             .multilineTextAlignment(.leading)
                             .foregroundStyle(.primary)

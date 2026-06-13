@@ -121,6 +121,7 @@ private struct HistoryRow: View {
                 Image(systemName: TopicGlyph.symbol(for: report.topic))
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(tint)
+                    .accessibilityHidden(true)
             )
     }
 

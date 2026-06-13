@@ -21,6 +21,7 @@ struct SourceHealthView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Refresh")
+                .accessibilityLabel("Refresh")
             }
 
             if rows.isEmpty {
@@ -28,6 +29,7 @@ struct SourceHealthView: View {
                     Image(systemName: "antenna.radiowaves.left.and.right")
                         .font(.largeTitle)
                         .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
                     Text("No source runs yet")
                         .font(.headline)
                     Text("Generate a report to start populating per-source stats.")

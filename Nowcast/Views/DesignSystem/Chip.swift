@@ -19,6 +19,7 @@ struct Chip: View {
             if let systemImage {
                 Image(systemName: systemImage)
                     .font(.caption2)
+                    .accessibilityHidden(true)
             }
             Text(text)
                 .font(.caption2)

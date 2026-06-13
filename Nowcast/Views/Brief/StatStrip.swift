@@ -44,6 +44,7 @@ struct StatStrip: View {
             Image(systemName: systemImage)
                 .font(.callout)
                 .foregroundStyle(tint)
+                .accessibilityHidden(true)
             HStack(spacing: 3) {
                 Text(value).font(.callout.bold())
                 Text(label).font(.caption).foregroundStyle(.secondary)

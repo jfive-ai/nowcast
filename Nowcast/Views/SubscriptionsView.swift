@@ -94,6 +94,7 @@ struct SubscriptionsView: View {
                                 Image(systemName: "trash")
                             }
                             .buttonStyle(.borderless)
+                            .accessibilityLabel("Delete subscription")
                         }
                     }
                 }
