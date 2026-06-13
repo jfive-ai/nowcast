@@ -422,11 +422,30 @@ final class AppState: ObservableObject {
         }
         let cutoff = Date().addingTimeInterval(-Double(retentionDays) * 86_400)
         do {
+            // prod-15: snapshot the DB before a destructive prune actually
+            // removes anything, so an over-aggressive retention window is
+            // recoverable from the backups/ folder.
+            if let count = try? storage.reportCount(olderThan: cutoff), count > 0 {
+                if let backup = try? storage.backupDatabase() {
+                    Log.storage.info("retention: backed up DB before pruning \(count, privacy: .public) report(s) → \(backup.lastPathComponent, privacy: .public)")
+                }
+            }
             let removed = try storage.deleteReports(olderThan: cutoff)
             SpotlightIndexer.shared.remove(reportIDs: removed)
             refresh()
         } catch {
             lastError = error.localizedDescription
+        }
+    }
+
+    /// Manual "Back up now". Returns the backup file URL on success.
+    @discardableResult
+    func backupDatabaseNow() -> URL? {
+        do {
+            return try storage.backupDatabase()
+        } catch {
+            lastError = "Backup failed: \(error.redactedDescription)"
+            return nil
         }
     }
 
