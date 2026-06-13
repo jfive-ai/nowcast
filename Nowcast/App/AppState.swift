@@ -394,6 +394,11 @@ final class AppState: ObservableObject {
             let removed = try storage.deleteReports(ids: [report.id])
             SpotlightIndexer.shared.remove(reportIDs: removed)
             if selectedReportID == report.id { selectedReportID = nil }
+            // Don't leave a deleted brief rendered in the compare pane.
+            if let pair = compareSelection,
+               pair.left.id == report.id || pair.right.id == report.id {
+                compareSelection = nil
+            }
             refresh()
         } catch {
             lastError = error.localizedDescription
