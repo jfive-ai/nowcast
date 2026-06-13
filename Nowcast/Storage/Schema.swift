@@ -298,6 +298,22 @@ enum Schema {
             }
         }
 
+        // v17: indexes for the hot report filters. v1 indexed `generated_at`
+        // alone, but `preset_id` (compare candidates, prior-report lookup,
+        // per-preset big-story percentile) and `kind` (daily vs weekly
+        // listing) were unindexed — forcing table scans that grow with
+        // history. Additive (CREATE INDEX only); idempotent via IF NOT EXISTS
+        // so a dev DB that already has them migrates cleanly.
+        m.registerMigration("v17") { db in
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS report_on_preset_generated
+                ON report(preset_id, generated_at)
+                """)
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS report_on_kind ON report(kind)
+                """)
+        }
+
         return m
     }
 
