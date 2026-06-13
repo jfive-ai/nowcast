@@ -41,7 +41,7 @@ struct AnthropicClient: LLMClient {
         request.httpBody = try JSONEncoder().encode(body)
         request.timeoutInterval = 60
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await HTTPRetry.data(for: request, session: session)
         guard let http = response as? HTTPURLResponse else {
             throw LLMError.requestFailed(status: -1, body: "no HTTP response")
         }

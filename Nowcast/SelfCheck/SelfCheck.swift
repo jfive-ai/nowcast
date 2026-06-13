@@ -577,6 +577,25 @@ enum SelfCheck {
             _ = try? storage.deleteReports(ids: [storedUsageProbe.id])
         }
 
+        // prod-10: HTTP retry classification + backoff.
+        check("Retry: 429 is transient", HTTPRetry.isTransient(status: 429))
+        check("Retry: 503 is transient", HTTPRetry.isTransient(status: 503))
+        check("Retry: 200 is not transient", !HTTPRetry.isTransient(status: 200))
+        check("Retry: 404 is not transient", !HTTPRetry.isTransient(status: 404))
+        check("Retry: timeout URLError is transient", HTTPRetry.isTransient(urlError: .timedOut))
+        check("Retry: badURL URLError is not transient", !HTTPRetry.isTransient(urlError: .badURL))
+        check("Retry: Retry-After delta-seconds parsed",
+              HTTPRetry.retryAfterSeconds(HTTPURLResponse(
+                  url: URL(string: "https://api.example/v1")!, statusCode: 429,
+                  httpVersion: nil, headerFields: ["Retry-After": "7"])!) == 7)
+        check("Retry: backoff honors Retry-After (capped)",
+              HTTPRetry.delay(forAttempt: 1, retryAfter: 3) == 3)
+        check("Retry: backoff capped at maxDelay",
+              HTTPRetry.delay(forAttempt: 1, retryAfter: 9999) == HTTPRetry.maxDelay)
+        let jittered = HTTPRetry.delay(forAttempt: 3, retryAfter: nil)
+        check("Retry: jittered backoff stays within [0, maxDelay] (got \(jittered))",
+              jittered >= 0 && jittered <= HTTPRetry.maxDelay)
+
         lines.append("")
         lines.append("Final: \(passed ? "PASS" : "FAIL")  ·  report id: \(report.id.uuidString.prefix(8))")
         return Result(passed: passed, lines: lines)
