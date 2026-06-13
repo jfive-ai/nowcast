@@ -310,8 +310,9 @@ struct ReportView: View {
             Label(kind.displayName, systemImage: kind.symbol)
                 .symbolVariant(active ? .fill : .none)
                 .foregroundStyle(active ? kind.tint : .secondary)
-                .scaleEffect(active ? 1.12 : 1.0)
-                .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.5), value: active)
+                // Spring the fill/tint change so toggling feels responsive,
+                // without a persistent scale that would misalign toolbar items.
+                .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.6), value: active)
         }
         .help(kind.displayName)
     }
