@@ -25,8 +25,13 @@ struct ReportView: View {
         HSplitView {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(report.displayTitle)
-                        .font(.largeTitle).bold()
+                    ReportHeaderView(report: report)
+
+                    StatStrip(
+                        storyCount: clusters.count,
+                        itemCount: report.sourceCount,
+                        readMinutes: ReadingTime.minutes(for: markdown)
+                    )
 
                     if state.isBigStory(report) {
                         bigStoryBanner
@@ -34,23 +39,6 @@ struct ReportView: View {
 
                     if report.sentiment != nil {
                         sentimentIndicator
-                    }
-
-                    HStack(spacing: 6) {
-                        Text(report.generatedAt, style: .date)
-                        Text(report.generatedAt, style: .time)
-                        Text("·")
-                        Text(report.window.displayName)
-                        Text("·")
-                        Text("\(report.sourceCount) items")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                    if let usage = usageSummary {
-                        Text(usage)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
 
                     if !followUps.isEmpty {
@@ -436,25 +424,6 @@ struct ReportView: View {
               let anchor = window.contentView else { return }
         let picker = NSSharingServicePicker(items: [markdown])
         picker.show(relativeTo: .zero, of: anchor, preferredEdge: .minY)
-    }
-
-    /// Compact "<provider> · <model> · 1.2k tok · ~$0.01" line. `nil` when
-    /// nothing useful was recorded (Ollama with no usage block, pre-v3 reports).
-    private var usageSummary: String? {
-        var parts: [String] = []
-        if let provider = report.providerUsed, !provider.isEmpty {
-            parts.append(provider)
-        }
-        if let model = report.modelUsed, !model.isEmpty {
-            parts.append(model)
-        }
-        if let total = report.totalTokens, total > 0 {
-            parts.append("\(total) tok")
-        }
-        if let cost = report.usdCost, cost > 0 {
-            parts.append(cost < 0.01 ? "~<$0.01" : String(format: "~$%.3f", cost))
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     private var sentimentIndicator: some View {
