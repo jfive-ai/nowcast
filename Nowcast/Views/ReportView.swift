@@ -23,6 +23,7 @@ struct ReportView: View {
     /// False until the brief's markdown/clusters have loaded from disk; gates
     /// the skeleton placeholder so content doesn't pop in from blank (V9).
     @State private var loaded: Bool = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HSplitView {
@@ -77,10 +78,13 @@ struct ReportView: View {
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
+                .transition(.opacity)
                 } else {
                     ReportSkeletonView()
+                        .transition(.opacity)
                 }
             }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: loaded)
 
             if chatOpen, let session = chatHolder.session {
                 ChatDrawerView(session: session)
@@ -207,9 +211,12 @@ struct ReportView: View {
                 .disabled(state.candidateReportsForCompare(report).isEmpty)
 
                 Button(action: copyMarkdown) {
-                    Label(copyFlash ? "Copied" : "Copy", systemImage: "doc.on.doc")
+                    Label(copyFlash ? "Copied" : "Copy",
+                          systemImage: copyFlash ? "checkmark" : "doc.on.doc")
+                        .foregroundStyle(copyFlash ? Color.green : .secondary)
                 }
                 .help("Copy the report markdown to the clipboard")
+                .animation(reduceMotion ? nil : Theme.Motion.quick, value: copyFlash)
 
                 Menu {
                     Button("Save as Markdown…") { saveMarkdown() }
@@ -303,6 +310,8 @@ struct ReportView: View {
             Label(kind.displayName, systemImage: kind.symbol)
                 .symbolVariant(active ? .fill : .none)
                 .foregroundStyle(active ? kind.tint : .secondary)
+                .scaleEffect(active ? 1.12 : 1.0)
+                .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.5), value: active)
         }
         .help(kind.displayName)
     }
