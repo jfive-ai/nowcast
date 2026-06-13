@@ -77,7 +77,8 @@ struct ReportView: View {
                     }
                 }
                 .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: Theme.Layout.readingMeasure, alignment: .leading)
+                .frame(maxWidth: .infinity)
                 .transition(.opacity)
                 } else {
                     ReportSkeletonView()

@@ -15,6 +15,13 @@ enum Theme {
         static let xxl: CGFloat = 32
     }
 
+    enum Layout {
+        /// Max width for the brief reading column — caps line length to a
+        /// comfortable measure on wide windows; narrower windows fill available
+        /// space (the value is a max, not a fixed width).
+        static let readingMeasure: CGFloat = 720
+    }
+
     enum Radius {
         /// Small chips / inner callouts.
         static let sm: CGFloat = 6

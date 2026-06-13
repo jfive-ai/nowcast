@@ -13,7 +13,7 @@ struct BriefMarkdownView: View {
 
     init(markdown: String,
          urlIndex: [String: PersistedItem] = [:],
-         lineSpacing: CGFloat = 3) {
+         lineSpacing: CGFloat = 5) {
         self.blocks = BriefMarkdown.parse(markdown)
         self.urlIndex = urlIndex
         self.lineSpacing = lineSpacing
