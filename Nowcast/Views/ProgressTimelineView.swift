@@ -60,6 +60,7 @@ struct ProgressTimelineView: View {
                     .font(.caption)
                     .foregroundStyle(failed ? Color.red : (active ? Color.accentColor : .secondary))
                     .symbolVariant(active ? .fill : .none)
+                    .accessibilityHidden(true)
                 if !isLast {
                     Rectangle()
                         .fill(Color.secondary.opacity(0.30))

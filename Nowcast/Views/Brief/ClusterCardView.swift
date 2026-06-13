@@ -77,6 +77,8 @@ struct ClusterCardView: View {
                 }
                 .buttonStyle(.plain)
                 .help(kind.displayName)
+                .accessibilityLabel(kind.displayName)
+                .accessibilityValue(active ? "on" : "off")
             }
         }
         .padding(.horizontal, 7)
@@ -89,6 +91,7 @@ struct ClusterCardView: View {
             Image(systemName: symbol)
                 .foregroundStyle(color)
                 .font(.caption)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text(label)
                     .font(.caption2.bold())

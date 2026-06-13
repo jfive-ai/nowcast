@@ -77,6 +77,7 @@ struct TopicLibraryView: View {
                 }
                 .buttonStyle(.borderless)
                 .help("New preset")
+                .accessibilityLabel("New preset")
             }
 
             if state.presets.isEmpty {
@@ -121,16 +122,19 @@ private struct PresetRow: View {
                 }
                 .buttonStyle(.borderless)
                 .help("Run now")
+                .accessibilityLabel("Run now")
                 Button(action: onEdit) {
                     Image(systemName: "pencil")
                 }
                 .buttonStyle(.borderless)
                 .help("Edit")
+                .accessibilityLabel("Edit")
                 Button(action: onDelete) {
                     Image(systemName: "trash")
                 }
                 .buttonStyle(.borderless)
                 .help("Delete")
+                .accessibilityLabel("Delete")
             }
             HStack(spacing: 6) {
                 Text(preset.cadence.displayName)

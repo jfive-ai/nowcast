@@ -316,6 +316,8 @@ struct ReportView: View {
                 .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.6), value: active)
         }
         .help(kind.displayName)
+        .accessibilityLabel(kind.displayName)
+        .accessibilityValue(active ? "on" : "off")
     }
 
     private func toggleReportFeedback(_ kind: Feedback.Kind) {
@@ -399,6 +401,7 @@ struct ReportView: View {
         HStack(spacing: 8) {
             Image(systemName: "flame.fill")
                 .foregroundStyle(Color.orange)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Big story")
                     .font(.callout).bold()

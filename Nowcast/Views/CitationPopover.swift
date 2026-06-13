@@ -16,6 +16,7 @@ struct CitationPopover: View {
                 HStack(spacing: 3) {
                     if let symbol = sourceSymbol {
                         Image(systemName: symbol).font(.caption2)
+                            .accessibilityHidden(true)
                     }
                     Text(host).font(.caption2.bold())
                 }
@@ -88,6 +89,7 @@ struct CitationPopover: View {
                 Image(systemName: rel.band == .ok ? "checkmark.seal.fill" :
                       rel.band == .mixed ? "questionmark.circle" : "exclamationmark.triangle.fill")
                     .font(.caption2)
+                    .accessibilityHidden(true)
                 Text(rel.band.displayName)
                     .font(.caption2.bold())
             }

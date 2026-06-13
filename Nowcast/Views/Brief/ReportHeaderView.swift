@@ -43,6 +43,7 @@ struct ReportHeaderView: View {
                 Image(systemName: TopicGlyph.symbol(for: report.topic))
                     .font(.system(size: 20, weight: .semibold))
                     .foregroundStyle(tint)
+                    .accessibilityHidden(true)
             )
     }
 

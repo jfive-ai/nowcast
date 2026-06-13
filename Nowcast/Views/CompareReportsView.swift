@@ -77,6 +77,7 @@ struct CompareReportsView: View {
     private func deltaChip(_ kind: String, systemImage: String, color: Color, label: String) -> some View {
         HStack(spacing: 4) {
             Image(systemName: systemImage).font(.caption2)
+                .accessibilityHidden(true)
             Text(kind).font(.caption2.bold())
             Text(label).font(.caption).foregroundStyle(.primary).lineLimit(1)
         }
@@ -119,6 +120,7 @@ struct CompareReportsView: View {
                     Image(systemName: TopicGlyph.symbol(for: report.topic))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(TopicGlyph.tint(for: report.topic))
+                        .accessibilityHidden(true)
                 )
             VStack(alignment: .leading, spacing: 1) {
                 Text(report.displayTitle).font(.subheadline.bold()).lineLimit(1)

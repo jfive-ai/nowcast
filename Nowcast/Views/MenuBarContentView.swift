@@ -39,6 +39,7 @@ struct MenuBarContentView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: playing ? "pause.fill" : (paused ? "play.fill" : "play.fill"))
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(playing ? "Pause brief" : (paused ? "Resume brief" : "Play today's brief"))
                         .font(.body)
@@ -144,6 +145,7 @@ struct MenuBarContentView: View {
                         HStack {
                             Image(systemName: "play.fill")
                                 .foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
                             Text(preset.name)
                                 .lineLimit(1)
                             Spacer()

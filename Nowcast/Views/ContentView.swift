@@ -90,6 +90,7 @@ struct ContentView: View {
                 Image(systemName: "newspaper")
                     .font(.system(size: 38, weight: .light))
                     .foregroundStyle(Color.accentColor)
+                    .accessibilityHidden(true)
             }
             VStack(spacing: Theme.Spacing.xs + 2) {
                 Text("No briefing selected")
@@ -116,6 +117,7 @@ struct ContentView: View {
             Image(systemName: icon)
                 .font(.title3)
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             Text(text)
                 .font(.caption)
                 .foregroundStyle(.secondary)
