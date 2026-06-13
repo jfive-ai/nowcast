@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import GRDB
 
 /// One-click self-check that exercises every Phase-4 code path against the
 /// real DB without spending on a live LLM. Run from Settings → Pipeline →
@@ -592,6 +593,27 @@ enum SelfCheck {
         let reliability = (try? storage.sourceReliability()) ?? []
         check("prod-30: sourceReliability aggregates host mentions (got \(reliability.count) hosts)",
               reliability.contains { $0.host == "mock.example" && $0.mentions >= 1 })
+
+        // prod-15: backupDatabase writes a consistent, valid SQLite copy.
+        // Use a high maxBackups so this never prunes a user's real backups
+        // (the Settings-button self-check shares this code path).
+        let sourceReportCount = (try? storage.listReports())?.count ?? -1
+        if let backupURL = try? storage.backupDatabase(maxBackups: 1000) {
+            check("prod-15: backup file created",
+                  FileManager.default.fileExists(atPath: backupURL.path))
+            var backupReportCount: Int?
+            if let backupQueue = try? DatabaseQueue(path: backupURL.path) {
+                backupReportCount = try? await backupQueue.read { db in
+                    try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM report") ?? 0
+                }
+            }
+            check("prod-15: backup is a valid SQLite copy with the report table",
+                  backupReportCount != nil)
+            check("prod-15: backup report count matches source (got \(backupReportCount ?? -1) vs \(sourceReportCount))",
+                  backupReportCount == sourceReportCount)
+        } else {
+            check("prod-15: backupDatabase succeeded", false)
+        }
 
         // prod-10: HTTP retry classification + backoff.
         check("Retry: 429 is transient", HTTPRetry.isTransient(status: 429))

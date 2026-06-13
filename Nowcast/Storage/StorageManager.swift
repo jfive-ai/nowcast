@@ -203,6 +203,71 @@ final class StorageManager {
         return stale.map(\.id)
     }
 
+    /// How many reports are older than `cutoff` (so callers can decide whether
+    /// a destructive retention prune is about to remove anything).
+    func reportCount(olderThan cutoff: Date) throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM report WHERE generated_at < ?",
+                             arguments: [cutoff]) ?? 0
+        }
+    }
+
+    // MARK: - Backup
+
+    static let backupDirName = "backups"
+
+    /// Write a consistent point-in-time copy of the database into
+    /// `Application Support/Nowcast/backups/`, keeping at most `maxBackups`
+    /// (oldest pruned). Uses `VACUUM INTO` for a clean, lock-free snapshot
+    /// (no partial-WAL surprises). Returns the new backup's URL.
+    ///
+    /// Called automatically before a destructive retention prune so a user who
+    /// set an aggressive retention window can recover if it removed too much.
+    @discardableResult
+    func backupDatabase(maxBackups: Int = 5) throws -> URL {
+        let dir = AppPaths.supportDirectory.appendingPathComponent(Self.backupDirName, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let stamp = Self.backupStampFormatter.string(from: Date())
+        let dest = dir.appendingPathComponent("nowcast-\(stamp)-\(UUID().uuidString.prefix(6)).sqlite")
+        try? FileManager.default.removeItem(at: dest)
+        // VACUUM INTO can't run inside a transaction.
+        try dbQueue.writeWithoutTransaction { db in
+            try db.execute(sql: "VACUUM INTO ?", arguments: [dest.path])
+        }
+        Self.pruneBackups(in: dir, keeping: max(1, maxBackups))
+        return dest
+    }
+
+    /// All backup files on disk, newest first.
+    func listBackups() -> [URL] {
+        let dir = AppPaths.supportDirectory.appendingPathComponent(Self.backupDirName, isDirectory: true)
+        return Self.sortedBackups(in: dir)
+    }
+
+    private static func sortedBackups(in dir: URL) -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: [.creationDateKey]))?
+            .filter { $0.pathExtension == "sqlite" } ?? []
+        return files.sorted { a, b in
+            let da = (try? a.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+            let db = (try? b.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+            return da > db
+        }
+    }
+
+    private static func pruneBackups(in dir: URL, keeping: Int) {
+        for old in sortedBackups(in: dir).dropFirst(keeping) {
+            try? FileManager.default.removeItem(at: old)
+        }
+    }
+
+    private static let backupStampFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd-HHmmss-SSS"
+        return f
+    }()
+
     /// Most-recent report ID, if any. Used as a synthetic anchor for
     /// source-health rows on noFreshItems runs (FIX: codex review PR #41).
     func mostRecentReportID() throws -> UUID? {
