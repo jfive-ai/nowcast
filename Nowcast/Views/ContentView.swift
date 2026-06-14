@@ -53,7 +53,7 @@ struct ContentView: View {
         }
         .overlay(alignment: .topTrailing) {
             if let gen = state.generation {
-                ProgressTimelineView(state: gen)
+                ProgressTimelineView(state: gen, onCancel: { state.cancelGeneration() })
                     .padding(16)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }

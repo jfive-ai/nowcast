@@ -139,6 +139,15 @@ final class AppState: ObservableObject {
 
     private(set) var pipeline: ReportPipeline?
 
+    /// The in-flight briefing call, retained so the user can Stop it (prod-09).
+    private var pipelineTask: Task<Report, Error>?
+
+    /// Cancel the in-flight generation, if any. The pipeline's awaited network
+    /// call unwinds and `runPipeline` records the run as cancelled.
+    func cancelGeneration() {
+        pipelineTask?.cancel()
+    }
+
     /// True when an LLM provider is configured (i.e. a pipeline could be
     /// built). Drives the first-run onboarding card.
     var isProviderConfigured: Bool { pipeline != nil }
@@ -319,6 +328,14 @@ final class AppState: ObservableObject {
             lastError = missingProviderMessage
             return
         }
+        // prod-09: don't start a second run on top of an in-flight one (e.g. a
+        // scheduled fire landing while a manual run is generating). We're on
+        // the MainActor and there's no suspension before `isGenerating = true`,
+        // so this check is race-free.
+        guard !isGenerating else {
+            Log.scheduler.notice("skipped overlapping generation (one already in flight)")
+            return
+        }
         // prod-14: refuse to run once the monthly spend cap is reached, so an
         // aggressive/unattended schedule can't quietly rack up cost.
         let monthSpend = (try? storage.spend(since: SpendGuard.monthStart(Date()))) ?? 0
@@ -343,6 +360,7 @@ final class AppState: ObservableObject {
         generation = GenerationState(runID: runID, topic: topic, startedAt: Date())
         defer {
             isGenerating = false
+            pipelineTask = nil
             // Keep the final state visible for a moment so the user can
             // see the "Done" stage land before the overlay dismisses.
             Task { @MainActor in
@@ -350,8 +368,9 @@ final class AppState: ObservableObject {
                 if self.generation?.runID == runID { self.generation = nil }
             }
         }
-        do {
-            let report = try await pipeline.generate(
+        // prod-09: run inside a retained Task so cancelGeneration() can stop it.
+        let task = Task<Report, Error> {
+            try await pipeline.generate(
                 topic: topic,
                 window: window,
                 sources: sources,
@@ -363,6 +382,10 @@ final class AppState: ObservableObject {
                     }
                 }
             )
+        }
+        pipelineTask = task
+        do {
+            let report = try await task.value
             refresh()
 
             // Spotlight donation: searchable from anywhere on the Mac.
@@ -388,8 +411,13 @@ final class AppState: ObservableObject {
                 // and history list; no extra side effect needed.
             }
         } catch {
-            lastError = error.localizedDescription
-            generation?.push(.failed(message: error.localizedDescription))
+            if task.isCancelled {
+                // User pressed Stop — not an error worth an alert.
+                generation?.push(.failed(message: "Stopped."))
+            } else {
+                lastError = error.localizedDescription
+                generation?.push(.failed(message: error.localizedDescription))
+            }
         }
     }
 
