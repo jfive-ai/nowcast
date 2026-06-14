@@ -385,6 +385,9 @@ struct SettingsView: View {
             state.retentionDays = v
             state.applyRetention()
         }
+        // Revert the field to the authoritative value — discards non-numeric or
+        // negative input (which previously stuck in the field with no effect).
+        draftRetention = String(state.retentionDays)
     }
 
     private func commitBudget() {
