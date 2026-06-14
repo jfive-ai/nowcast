@@ -75,8 +75,11 @@ struct NitterAdapter: SourceAdapter {
         request.setValue("application/rss+xml, application/xml", forHTTPHeaderField: "Accept")
 
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .xNitter)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw SourceError.from(status: http.statusCode, response: http, kind: .xNitter)
         }
 
         // FeedKit 10 replaced the closure-based `FeedParser` with synchronous

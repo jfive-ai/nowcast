@@ -594,6 +594,28 @@ enum SelfCheck {
         check("prod-30: sourceReliability aggregates host mentions (got \(reliability.count) hosts)",
               reliability.contains { $0.host == "mock.example" && $0.mentions >= 1 })
 
+        // prod-22: HTTP failures map to the right SourceError category.
+        check("prod-22: 429 → rateLimited (actionable)", {
+            if case .rateLimited = SourceError.from(status: 429, kind: .reddit) { return true }
+            return false
+        }())
+        check("prod-22: 403 → authFailed (actionable)", {
+            if case .authFailed = SourceError.from(status: 403, kind: .youtubeChannel) { return true }
+            return false
+        }())
+        check("prod-22: 503 → serverError (not actionable)",
+              SourceError.from(status: 503, kind: .news).isActionable == false)
+        check("prod-22: 418 → generic requestFailed",
+              { if case .requestFailed = SourceError.from(status: 418, kind: .web) { return true }; return false }())
+        check("prod-22: rateLimited & authFailed are actionable; server/generic are not",
+              SourceError.from(status: 429, kind: .reddit).isActionable
+              && SourceError.from(status: 401, kind: .web).isActionable
+              && !SourceError.from(status: 500, kind: .news).isActionable
+              && !SourceError.from(status: 404, kind: .news).isActionable)
+        check("prod-22: categorized errors have distinct messages",
+              SourceError.from(status: 429, kind: .reddit).errorDescription
+                != SourceError.from(status: 403, kind: .reddit).errorDescription)
+
         // prod-36: dangling entity_mention rows (cluster_id pointing at no
         // cluster) are pruned; real mentions and the empty key are kept.
         if let topEntity = (try? storage.topEntities(limit: 1))?.first {
