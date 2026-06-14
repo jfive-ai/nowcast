@@ -41,6 +41,10 @@ struct YouTubeChannelAdapter: SourceAdapter {
                     do {
                         return try await fetchChannel(raw: raw, cutoff: cutoff)
                     } catch {
+                        // prod-22: a quota/auth (403) or rate-limit (429) is a
+                        // real state the user must see — don't bury it as "no
+                        // uploads". Other per-channel blips still degrade to [].
+                        if (error as? SourceError)?.isActionable == true { throw error }
                         return []
                     }
                 }
@@ -100,8 +104,11 @@ struct YouTubeChannelAdapter: SourceAdapter {
         request.timeoutInterval = 30
         request.setValue(apiKey, forHTTPHeaderField: "X-Goog-Api-Key")
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .youtubeChannel)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw SourceError.from(status: http.statusCode, response: http, kind: .youtubeChannel)
         }
         let parsed = try JSONDecoder.youtube.decode(ChannelsResponse.self, from: data)
         return parsed.items.first?.contentDetails.relatedPlaylists.uploads
@@ -123,8 +130,11 @@ struct YouTubeChannelAdapter: SourceAdapter {
         request.timeoutInterval = 30
         request.setValue(apiKey, forHTTPHeaderField: "X-Goog-Api-Key")
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .youtubeChannel)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw SourceError.from(status: http.statusCode, response: http, kind: .youtubeChannel)
         }
         let parsed = try JSONDecoder.youtube.decode(PlaylistItemsResponse.self, from: data)
         return parsed.items.compactMap { item -> Video? in

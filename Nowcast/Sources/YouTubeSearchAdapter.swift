@@ -41,8 +41,11 @@ struct YouTubeSearchAdapter: SourceAdapter {
         request.setValue(apiKey, forHTTPHeaderField: "X-Goog-Api-Key")
 
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .youtubeSearch)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw SourceError.from(status: http.statusCode, response: http, kind: .youtubeSearch)
         }
 
         let parsed = try JSONDecoder.youtube.decode(YTSearchResponse.self, from: data)

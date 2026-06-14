@@ -60,8 +60,16 @@ struct RedditAdapter: SourceAdapter {
                       )
                 else { continue }
                 group.addTask {
-                    // A single broken subreddit shouldn't poison the whole run.
-                    do { return try await fetchListing(url: url, cutoff: cutoff) } catch { return [] }
+                    // A single broken subreddit shouldn't poison the whole run —
+                    // BUT a 429 rate-limit or 401/403 (Reddit's anonymous .json
+                    // is the most rate-limited source here) is a real state the
+                    // user must see, not silently merged into empty results.
+                    do {
+                        return try await fetchListing(url: url, cutoff: cutoff)
+                    } catch {
+                        if (error as? SourceError)?.isActionable == true { throw error }
+                        return []
+                    }
                 }
             }
             var all: [RawItem] = []
@@ -98,8 +106,11 @@ struct RedditAdapter: SourceAdapter {
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
 
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .reddit)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw SourceError.from(status: http.statusCode, response: http, kind: .reddit)
         }
         let parsed = try JSONDecoder().decode(RedditListing.self, from: data)
 

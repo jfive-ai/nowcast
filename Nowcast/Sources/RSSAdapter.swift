@@ -51,7 +51,7 @@ struct RSSAdapter: SourceAdapter {
 
         let (data, response) = try await session.data(for: request)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
-            throw SourceError.requestFailed(kind: .rss)
+            throw SourceError.from(status: http.statusCode, response: http, kind: .rss)
         }
 
         let result = try Self.parse(data: data)
