@@ -12,10 +12,23 @@ import Foundation
 /// `OutboundURLPolicy.guardedSession`, which adds SSRF redirect blocking on top
 /// of the same timeouts.
 enum HTTPSessions {
+    /// Trusted-host adapters: small JSON / feeds fetched quickly → 60s total.
     static let standard: URLSession = {
         let cfg = URLSessionConfiguration.default
         cfg.timeoutIntervalForRequest = 30
         cfg.timeoutIntervalForResource = 60
+        cfg.waitsForConnectivity = false
+        return URLSession(configuration: cfg)
+    }()
+
+    /// LLM calls: a completion can legitimately take minutes — a cold-start
+    /// local Ollama model (the client budgets 180s) or a long cloud completion
+    /// under load — so the resource cap is generous. (`timeoutIntervalForResource`
+    /// is session-level and would otherwise override the per-request timeout.)
+    static let llm: URLSession = {
+        let cfg = URLSessionConfiguration.default
+        cfg.timeoutIntervalForRequest = 180
+        cfg.timeoutIntervalForResource = 300
         cfg.waitsForConnectivity = false
         return URLSession(configuration: cfg)
     }()
