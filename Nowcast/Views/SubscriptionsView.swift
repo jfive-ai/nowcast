@@ -68,6 +68,11 @@ struct SubscriptionsView: View {
                     Button("Add") { add() }
                         .disabled(!isAddValid)
                 }
+                if let validationError = addValidationError {
+                    Text(validationError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
                 Text(helpText)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -104,7 +109,14 @@ struct SubscriptionsView: View {
     }
 
     private var isAddValid: Bool {
-        !draftIdentifier.trimmingCharacters(in: .whitespaces).isEmpty
+        SubscriptionValidator.validationError(kind: draftKind, identifier: draftIdentifier) == nil
+    }
+
+    /// The per-kind validation message, but only once the user has typed
+    /// something (don't nag an empty field).
+    private var addValidationError: String? {
+        guard !draftIdentifier.trimmingCharacters(in: .whitespaces).isEmpty else { return nil }
+        return SubscriptionValidator.validationError(kind: draftKind, identifier: draftIdentifier)
     }
 
     private var identifierHint: String {
