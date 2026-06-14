@@ -68,17 +68,7 @@ struct QueryRewriter {
     /// Pulls the JSON object out of free-form text (model may have wrapped
     /// it in markdown despite instructions).
     private static func extractJSON(_ raw: String) -> [String]? {
-        let candidate: String
-        if let openRange = raw.range(of: "```"),
-           let closeRange = raw.range(of: "```", range: openRange.upperBound..<raw.endIndex) {
-            // strip optional ```json language tag
-            var body = String(raw[openRange.upperBound..<closeRange.lowerBound])
-            if body.hasPrefix("json") { body = String(body.dropFirst(4)) }
-            candidate = body
-        } else {
-            candidate = raw
-        }
-        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = LLMJSON.stripFence(raw).trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
         guard let data = trimmed.data(using: .utf8),
               let env = try? JSONDecoder().decode(Envelope.self, from: data)

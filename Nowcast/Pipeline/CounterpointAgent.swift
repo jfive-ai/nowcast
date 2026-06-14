@@ -97,12 +97,8 @@ final class CounterpointAgent {
     }
 
     static func parse(_ raw: String) -> [Hit] {
-        guard let start = raw.firstIndex(of: "{"),
-              let end = raw.lastIndex(of: "}"),
-              start <= end
-        else { return [] }
-        let json = String(raw[start...end])
-        guard let data = json.data(using: .utf8) else { return [] }
+        guard let json = LLMJSON.firstJSONSlice(in: raw),
+              let data = json.data(using: .utf8) else { return [] }
         struct Envelope: Decodable { let hits: [Hit] }
         return (try? JSONDecoder().decode(Envelope.self, from: data))?.hits ?? []
     }
