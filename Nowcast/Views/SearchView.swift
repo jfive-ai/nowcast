@@ -25,7 +25,7 @@ struct SearchView: View {
     @State private var query: String = ""
     @State private var hits: [StorageManager.SearchHit] = []
     @State private var semanticHits: [AppState.SemanticHit] = []
-    @State private var debounceWork: DispatchWorkItem?
+    @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -155,21 +155,27 @@ struct SearchView: View {
     }
 
     private func schedule() {
-        debounceWork?.cancel()
+        searchTask?.cancel()
         let snapshot = query
         let currentMode = mode
-        let work = DispatchWorkItem {
+        // prod-29: debounce, then run the actual search OFF the main thread so
+        // the FTS query / cosine loop doesn't stutter typing on a large archive.
+        searchTask = Task {
+            try? await Task.sleep(nanoseconds: 200_000_000)
+            guard !Task.isCancelled else { return }
             switch currentMode {
             case .keyword:
-                hits = state.searchReports(snapshot)
+                let result = await state.searchReportsAsync(snapshot)
+                guard !Task.isCancelled else { return }
+                hits = result
                 semanticHits = []
             case .semantic:
-                semanticHits = state.semanticSearch(snapshot)
+                let result = await state.semanticSearchAsync(snapshot)
+                guard !Task.isCancelled else { return }
+                semanticHits = result
                 hits = []
             }
         }
-        debounceWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: work)
     }
 }
 
