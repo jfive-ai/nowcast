@@ -41,6 +41,12 @@ enum TranscriptFetcher {
         }
         var request = URLRequest(url: url)
         request.setValue(browserUA, forHTTPHeaderField: "User-Agent")
+        // prod-33: ask for English and pre-consent so YouTube doesn't serve the
+        // EU/region "Before you continue" interstitial (which has no
+        // captionTracks), which otherwise makes every transcript fetch in those
+        // regions silently fail.
+        request.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
+        request.setValue("CONSENT=YES+1", forHTTPHeaderField: "Cookie")
         request.timeoutInterval = 30
 
         let (data, response) = try await session.data(for: request)
@@ -50,7 +56,31 @@ enum TranscriptFetcher {
         guard let html = String(data: data, encoding: .utf8) else {
             throw TranscriptError.fetchFailed
         }
+        // prod-33: if we still got an interstitial (consent wall / bot check /
+        // A-B variant with no player), say so distinctly rather than the
+        // generic noTracks, so the failure is diagnosable.
+        if Self.isInterstitial(html) {
+            throw TranscriptError.interstitial
+        }
         return html
+    }
+
+    /// True when the watch page is a consent/bot-check interstitial rather than
+    /// a real video page. Pure — unit-checked by the headless self-check.
+    static func isInterstitial(_ html: String) -> Bool {
+        // A real watch page always carries the player config; an interstitial
+        // doesn't. Combine that with positive markers for the known walls.
+        let lowered = html.lowercased()
+        let hasPlayer = html.contains("ytInitialPlayerResponse") || html.contains("\"captionTracks\"")
+        if hasPlayer { return false }
+        let markers = [
+            "consent.youtube.com",
+            "before you continue",
+            "sign in to confirm you",   // "...you're not a bot"
+            "/sorry/index",             // bot-check
+            "this page isn't available",
+        ]
+        return markers.contains { lowered.contains($0) }
     }
 
     private struct CaptionTrack {
@@ -150,4 +180,6 @@ enum TranscriptError: Error {
     case invalidBaseURL
     case fetchFailed
     case empty
+    /// The watch page was a consent/bot-check interstitial, not a video page.
+    case interstitial
 }
