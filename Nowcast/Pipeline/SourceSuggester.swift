@@ -80,17 +80,6 @@ struct SourceSuggester {
 
     /// LLMs sometimes add ```json ... ``` despite being told not to.
     private static func stripCodeFence(_ raw: String) -> String {
-        var s = raw
-        if let r = s.range(of: "```") {
-            s = String(s[r.upperBound...])
-            // Drop a leading "json\n" if present.
-            if s.lowercased().hasPrefix("json") {
-                s = String(s.dropFirst(4))
-            }
-            if let end = s.range(of: "```") {
-                s = String(s[..<end.lowerBound])
-            }
-        }
-        return s
+        LLMJSON.stripFence(raw)
     }
 }

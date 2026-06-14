@@ -615,6 +615,23 @@ enum SelfCheck {
         check("prod-46: valid report_fts row survives reconcile",
               reportFTSCount(report.id.uuidString) == 1)
 
+        // prod-24: consolidated LLM JSON extraction.
+        check("LLMJSON: slices a bare object",
+              LLMJSON.firstJSONSlice(in: "{\"a\":1}") == "{\"a\":1}")
+        check("LLMJSON: slices an object out of surrounding prose",
+              LLMJSON.firstJSONSlice(in: "here you go {\"a\":1} thanks") == "{\"a\":1}")
+        check("LLMJSON: spans first '{' to last '}' (nested)",
+              LLMJSON.firstJSONSlice(in: "x {\"a\":{\"b\":2}} y") == "{\"a\":{\"b\":2}}")
+        check("LLMJSON: nil when there is no object",
+              LLMJSON.firstJSONSlice(in: "no json here") == nil)
+        check("LLMJSON: strips a ```json fence",
+              LLMJSON.stripFence("```json\n{\"a\":1}\n```").contains("{\"a\":1}")
+              && !LLMJSON.stripFence("```json\n{\"a\":1}\n```").contains("```"))
+        check("LLMJSON: strips a bare ``` fence",
+              !LLMJSON.stripFence("```\n{\"b\":2}\n```").contains("`"))
+        check("LLMJSON: passes through unfenced text",
+              LLMJSON.stripFence("{\"c\":3}") == "{\"c\":3}")
+
         // prod-22: HTTP failures map to the right SourceError category.
         check("prod-22: 429 → rateLimited (actionable)", {
             if case .rateLimited = SourceError.from(status: 429, kind: .reddit) { return true }
