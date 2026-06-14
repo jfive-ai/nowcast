@@ -79,18 +79,24 @@ struct NitterAdapter: SourceAdapter {
                   OutboundURLPolicy.allows(url) else { continue }
             do {
                 let items = try await fetchRSS(from: url, cutoff: cutoff)
-                return HandleOutcome(
-                    items: items,
-                    succeededMirror: items.isEmpty ? nil : base,
-                    failedMirrors: failed
-                )
+                if !items.isEmpty {
+                    return HandleOutcome(items: items, succeededMirror: base, failedMirrors: failed)
+                }
+                // prod-21: a 200-but-EMPTY mirror is "up but returned nothing"
+                // — often a broken/stale mirror, not genuinely no activity. Try
+                // the next mirror before giving up; only after every mirror is
+                // exhausted do we report "no activity".
+                continue
             } catch {
                 failed.append(base)
                 continue
             }
         }
-        // All mirrors failed/empty — surface as "no activity" per the phase
-        // risk note; the failures are still demoted.
+        // Every mirror failed or returned empty — surface as "no activity" per
+        // the Phase 2.5 risk note (an empty handle is not a report failure).
+        if !failed.isEmpty {
+            Log.network.notice("Nitter: no items for handle; \(failed.count, privacy: .public) mirror(s) errored")
+        }
         return HandleOutcome(items: [], succeededMirror: nil, failedMirrors: failed)
     }
 
