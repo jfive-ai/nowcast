@@ -4,6 +4,8 @@ import SwiftUI
 /// (P5-5). Bound to `AppState.generation`.
 struct ProgressTimelineView: View {
     let state: GenerationState
+    /// Stop the in-flight generation. When nil, no Stop button is shown.
+    var onCancel: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -33,6 +35,14 @@ struct ProgressTimelineView: View {
             Text(elapsedString)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
+            if let onCancel {
+                Button(role: .destructive, action: onCancel) {
+                    Image(systemName: "stop.fill")
+                }
+                .buttonStyle(.borderless)
+                .help("Stop generating")
+                .accessibilityLabel("Stop generating")
+            }
         }
         .padding(12)
     }
