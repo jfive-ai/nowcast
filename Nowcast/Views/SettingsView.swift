@@ -415,7 +415,9 @@ struct SettingsView: View {
         let calls = state.pipelineCallCount
         let base = "Up to \(calls) LLM call\(calls == 1 ? "" : "s") per report with current options."
         if let cost = state.estimatedCostPerReport(), cost > 0 {
-            return base + String(format: " ≈ $%.2f/report at the current model (rough).", cost)
+            // A sub-cent estimate must not render as "$0.00" (reads as free).
+            let costStr = cost < 0.01 ? "< $0.01" : String(format: "$%.2f", cost)
+            return base + " ≈ \(costStr)/report at the current model (rough)."
         }
         return base + " Pricing unknown for the selected model."
     }
