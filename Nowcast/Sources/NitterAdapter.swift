@@ -35,37 +35,63 @@ struct NitterAdapter: SourceAdapter {
 
         let cutoff = window.earliestDate
 
-        return await withTaskGroup(of: [RawItem].self) { group in
-            for handle in handles {
+        // prod-35: each handle's fetch reports its outcome instead of mutating
+        // the shared mirror list inline. With handles fetched concurrently, the
+        // old inline promote/demote calls interleaved non-deterministically and
+        // hammered the @MainActor store from every task. We collect outcomes,
+        // then apply the rotation ONCE after the join, in stable handle order.
+        let outcomes = await withTaskGroup(of: (Int, HandleOutcome).self) { group in
+            for (index, handle) in handles.enumerated() {
                 group.addTask {
-                    await fetchHandle(handle: handle, mirrors: mirrors, cutoff: cutoff)
+                    (index, await fetchHandle(handle: handle, mirrors: mirrors, cutoff: cutoff))
                 }
             }
-            var all: [RawItem] = []
-            for await chunk in group { all.append(contentsOf: chunk) }
-            return all
+            var collected: [(Int, HandleOutcome)] = []
+            for await pair in group { collected.append(pair) }
+            return collected.sorted { $0.0 < $1.0 }.map(\.1)
         }
+
+        let demotes = outcomes.flatMap(\.failedMirrors)
+        let promotes = outcomes.compactMap(\.succeededMirror)
+        await MainActor.run {
+            // Demote failures first, then promote successes, so a mirror that
+            // worked for at least one handle ends up at the front.
+            for mirror in demotes { mirrorStore.demote(mirror) }
+            for mirror in promotes { mirrorStore.promote(mirror) }
+        }
+        return outcomes.flatMap(\.items)
     }
 
     // MARK: - Internals
 
-    private func fetchHandle(handle: String, mirrors: [String], cutoff: Date) async -> [RawItem] {
+    private struct HandleOutcome {
+        let items: [RawItem]
+        /// The mirror that returned items (to promote), or nil.
+        let succeededMirror: String?
+        /// Mirrors that threw before a success (to demote), in order tried.
+        let failedMirrors: [String]
+    }
+
+    private func fetchHandle(handle: String, mirrors: [String], cutoff: Date) async -> HandleOutcome {
+        var failed: [String] = []
         for base in mirrors {
             guard let url = URL(string: "\(base)/\(handle)/rss"),
                   OutboundURLPolicy.allows(url) else { continue }
             do {
                 let items = try await fetchRSS(from: url, cutoff: cutoff)
-                if !items.isEmpty {
-                    await MainActor.run { mirrorStore.promote(base) }
-                }
-                return items
+                return HandleOutcome(
+                    items: items,
+                    succeededMirror: items.isEmpty ? nil : base,
+                    failedMirrors: failed
+                )
             } catch {
-                await MainActor.run { mirrorStore.demote(base) }
+                failed.append(base)
                 continue
             }
         }
-        // All mirrors failed — surface as "no activity" per the phase risk note.
-        return []
+        // All mirrors failed/empty — surface as "no activity" per the phase
+        // risk note; the failures are still demoted.
+        return HandleOutcome(items: [], succeededMirror: nil, failedMirrors: failed)
     }
 
     private func fetchRSS(from url: URL, cutoff: Date) async throws -> [RawItem] {
