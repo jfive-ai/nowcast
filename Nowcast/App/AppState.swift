@@ -139,6 +139,10 @@ final class AppState: ObservableObject {
 
     private(set) var pipeline: ReportPipeline?
 
+    /// True when an LLM provider is configured (i.e. a pipeline could be
+    /// built). Drives the first-run onboarding card.
+    var isProviderConfigured: Bool { pipeline != nil }
+
     static let retentionDaysKey = "nowcast.retention_days"
     static let monthlyBudgetKey = "nowcast.monthly_budget_usd"
     static let queryRewritingKey = "nowcast.query_rewriting_enabled"

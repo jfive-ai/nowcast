@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct ContentView: View {
     @EnvironmentObject private var state: AppState
@@ -44,6 +45,8 @@ struct ContentView: View {
                 ReportView(report: report)
                     .id(report.id)
                     .onAppear { state.markRead(reportID: report.id) }
+            } else if !state.isProviderConfigured {
+                onboardingCard
             } else {
                 placeholder
             }
@@ -63,10 +66,26 @@ struct ContentView: View {
                 set: { if !$0 { state.lastError = nil } }
             )
         ) {
-            Button("OK") { state.lastError = nil }
+            Button("Open Settings") {
+                state.lastError = nil
+                Self.openSettings()
+            }
+            Button("OK", role: .cancel) { state.lastError = nil }
         } message: {
             Text(state.lastError ?? "")
         }
+    }
+
+    /// Open the Settings/Preferences window. The selector differs between
+    /// macOS 13 (showPreferencesWindow:) and macOS 14+ (showSettingsWindow:).
+    static func openSettings() {
+        let selector: Selector
+        if #available(macOS 14, *) {
+            selector = Selector(("showSettingsWindow:"))
+        } else {
+            selector = Selector(("showPreferencesWindow:"))
+        }
+        NSApp.sendAction(selector, to: nil, from: nil)
     }
 
     private var selectedReport: Report? {
@@ -107,6 +126,40 @@ struct ContentView: View {
                 hint(icon: "magnifyingglass", text: "Search")
             }
             .padding(.top, Theme.Spacing.xs)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding(40)
+    }
+
+    private var onboardingCard: some View {
+        VStack(spacing: Theme.Spacing.lg) {
+            ZStack {
+                Circle()
+                    .fill(Color.accentColor.opacity(0.12))
+                    .frame(width: 92, height: 92)
+                Image(systemName: "key.horizontal")
+                    .font(.system(size: 34, weight: .light))
+                    .foregroundStyle(Color.accentColor)
+                    .accessibilityHidden(true)
+            }
+            VStack(spacing: Theme.Spacing.xs + 2) {
+                Text("Welcome to Nowcast")
+                    .font(.title3.bold())
+                Text("To generate briefings, add an LLM provider key in Settings — Nowcast uses it to summarize what it collects from your sources. Your key is stored in the macOS Keychain.")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 400)
+            }
+            Button {
+                Self.openSettings()
+            } label: {
+                Label("Open Settings", systemImage: "gearshape")
+            }
+            .buttonStyle(.borderedProminent)
+            Text("or press ⌘,")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding(40)
