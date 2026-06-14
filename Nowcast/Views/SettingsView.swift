@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var draftOllamaModel: String = ""
     @State private var draftOllamaURL: String = ""
     @State private var draftRetention: String = ""
+    @State private var draftBudget: String = ""
     @State private var savedFlash: Bool = false
     @State private var selfCheckResult: String = ""
     @State private var selfCheckPassed: Bool? = nil
@@ -45,6 +46,7 @@ struct SettingsView: View {
         draftOllamaModel = state.ollamaModel
         draftOllamaURL = state.ollamaBaseURL
         draftRetention = String(state.retentionDays)
+        draftBudget = state.monthlyBudgetUSD > 0 ? String(format: "%.2f", state.monthlyBudgetUSD) : ""
     }
 
     private var generalTab: some View {
@@ -103,6 +105,22 @@ struct SettingsView: View {
                     Spacer()
                 }
                 Text("0 keeps reports forever.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Cost guardrail") {
+                HStack {
+                    Text("$")
+                    TextField("Monthly cap", text: $draftBudget)
+                        .frame(width: 80)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { commitBudget() }
+                    Button("Apply") { commitBudget() }
+                    Spacer()
+                }
+                Text(String(format: "Spent this month: $%.2f · 0 = no limit. Runs are blocked once the cap is reached.",
+                            state.currentMonthSpend()))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -367,6 +385,17 @@ struct SettingsView: View {
             state.retentionDays = v
             state.applyRetention()
         }
+    }
+
+    private func commitBudget() {
+        let cleaned = draftBudget.trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "$", with: "")
+        if cleaned.isEmpty {
+            state.monthlyBudgetUSD = 0
+        } else if let v = Double(cleaned), v >= 0 {
+            state.monthlyBudgetUSD = v
+        }
+        draftBudget = state.monthlyBudgetUSD > 0 ? String(format: "%.2f", state.monthlyBudgetUSD) : ""
     }
 
     private func flashSaved() {

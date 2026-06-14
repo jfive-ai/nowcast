@@ -594,6 +594,26 @@ enum SelfCheck {
         check("prod-30: sourceReliability aggregates host mentions (got \(reliability.count) hosts)",
               reliability.contains { $0.host == "mock.example" && $0.mentions >= 1 })
 
+        // prod-14: monthly spend cap query + over-budget decision.
+        check("prod-14: over budget when spent >= cap",
+              SpendGuard.isOverBudget(spentThisMonth: 5.0, budget: 5.0))
+        check("prod-14: under budget when spent < cap",
+              !SpendGuard.isOverBudget(spentThisMonth: 4.99, budget: 5.0))
+        check("prod-14: zero cap means no limit",
+              !SpendGuard.isOverBudget(spentThisMonth: 999, budget: 0))
+        let budgetProbe = Report(
+            id: UUID(), presetID: nil, topic: "Budget probe \(runID)",
+            window: .today, generatedAt: Date(), markdownPath: "",
+            byteSize: 0, sourceCount: 1, kind: .daily
+        )
+        if let storedBudget = try? storage.insertReport(budgetProbe, markdown: "# budget \(runID)\n") {
+            try? storage.addReportUsage(reportID: storedBudget.id, promptTokens: 0, completionTokens: 0, usdCost: 0.42)
+            let spent = (try? storage.spend(since: SpendGuard.monthStart(Date()))) ?? 0
+            check("prod-14: spend(since: monthStart) includes this run's cost (got \(spent))",
+                  spent >= 0.42)
+            _ = try? storage.deleteReports(ids: [storedBudget.id])
+        }
+
         // prod-15: backupDatabase writes a consistent, valid SQLite copy.
         // Use a high maxBackups so this never prunes a user's real backups
         // (the Settings-button self-check shares this code path).
