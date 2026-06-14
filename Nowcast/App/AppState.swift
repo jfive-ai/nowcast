@@ -482,6 +482,44 @@ final class AppState: ObservableObject {
         (try? storage.spend(since: SpendGuard.monthStart(Date()))) ?? 0
     }
 
+    // MARK: - Cost estimate (prod-34)
+
+    /// Upper bound on LLM calls per report given the enabled pipeline toggles
+    /// (1 briefing call + each opt-in pass). Query rewriting only fires for 3+
+    /// word topics and entity extraction can fall back to rules, so this is a
+    /// ceiling, not an exact count.
+    var pipelineCallCount: Int {
+        1 + [queryRewritingEnabled,
+             contradictionDetectionEnabled,
+             entityExtractionEnabled,
+             counterpointsEnabled,
+             smartTitlesEnabled].filter { $0 }.count
+    }
+
+    /// The model id a run would use: the per-provider override, else the
+    /// provider's default.
+    var effectiveModelName: String {
+        let raw: String
+        switch llmProvider {
+        case .openAI:    raw = openAIModel
+        case .anthropic: raw = anthropicModel
+        case .ollama:    raw = ollamaModel
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? llmProvider.defaultModel : trimmed
+    }
+
+    /// Rough forward-looking cost of one report with the current options, or
+    /// nil when the model's pricing is unknown (local models, custom ids).
+    func estimatedCostPerReport() -> Double? {
+        ModelPricing.estimate(
+            model: effectiveModelName,
+            calls: pipelineCallCount,
+            avgPromptTokens: 4000,
+            avgCompletionTokens: 1000
+        )
+    }
+
     /// Manual "Back up now". Returns the backup file URL on success.
     @discardableResult
     func backupDatabaseNow() -> URL? {

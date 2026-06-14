@@ -48,4 +48,16 @@ enum ModelPricing {
         let output = Double(usage.completionTokens) * entry.outputUSDPerMillion / 1_000_000
         return input + output
     }
+
+    /// Forward-looking estimate: `calls` LLM calls of roughly
+    /// `avgPromptTokens`/`avgCompletionTokens` each. Returns `nil` when the
+    /// model's pricing is unknown. Used to surface "~$X/report" in Settings so
+    /// the user sees cost before an aggressive cadence racks it up (PLAN.md).
+    static func estimate(model: String, calls: Int, avgPromptTokens: Int, avgCompletionTokens: Int) -> Double? {
+        guard let perCall = cost(
+            forModel: model,
+            usage: LLMUsage(promptTokens: avgPromptTokens, completionTokens: avgCompletionTokens)
+        ) else { return nil }
+        return perCall * Double(max(0, calls))
+    }
 }
