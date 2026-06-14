@@ -632,6 +632,17 @@ enum SelfCheck {
         check("LLMJSON: passes through unfenced text",
               LLMJSON.stripFence("{\"c\":3}") == "{\"c\":3}")
 
+        // prod-33: consent/bot-check interstitial detection for YouTube
+        // watch pages (so EU consent walls don't masquerade as "no transcript").
+        check("prod-33: real watch page (has player config) is not an interstitial",
+              !TranscriptFetcher.isInterstitial("<html>... var ytInitialPlayerResponse = {\"captions\":...} ...</html>"))
+        check("prod-33: consent wall detected",
+              TranscriptFetcher.isInterstitial("<html><head><title>Before you continue to YouTube</title></head><body>consent.youtube.com</body></html>"))
+        check("prod-33: bot-check page detected",
+              TranscriptFetcher.isInterstitial("<html>Sign in to confirm you’re not a bot</html>".replacingOccurrences(of: "’", with: "'")))
+        check("prod-33: page WITH captionTracks is never an interstitial",
+              !TranscriptFetcher.isInterstitial("<html>consent.youtube.com but also \"captionTracks\":[...]</html>"))
+
         // prod-22: HTTP failures map to the right SourceError category.
         check("prod-22: 429 → rateLimited (actionable)", {
             if case .rateLimited = SourceError.from(status: 429, kind: .reddit) { return true }

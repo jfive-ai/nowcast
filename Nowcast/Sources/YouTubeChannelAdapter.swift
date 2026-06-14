@@ -15,6 +15,11 @@ struct YouTubeChannelAdapter: SourceAdapter {
     private let apiKey: String
     private let maxVideosPerChannel: Int
 
+    /// App-wide cap on concurrent transcript scrapes (prod-33). Shared across
+    /// channels so N channels × maxVideosPerChannel videos don't all hit
+    /// youtube.com/watch at once.
+    private static let transcriptGate = AsyncSemaphore(4)
+
     init(apiKey: String,
          session: URLSession = HTTPSessions.standard,
          maxVideosPerChannel: Int = 5) {
@@ -65,7 +70,9 @@ struct YouTubeChannelAdapter: SourceAdapter {
         return await withTaskGroup(of: RawItem.self) { group in
             for video in videos {
                 group.addTask {
+                    await Self.transcriptGate.acquire()
                     let transcript = try? await TranscriptFetcher.fetch(videoId: video.videoId)
+                    await Self.transcriptGate.release()
                     return RawItem(
                         title: video.title,
                         url: video.url,
