@@ -84,6 +84,11 @@ final class AppState: ObservableObject {
         didSet { UserDefaults.standard.set(retentionDays, forKey: Self.retentionDaysKey) }
     }
 
+    /// Monthly LLM spend cap in USD. 0 means no limit (prod-14).
+    @Published var monthlyBudgetUSD: Double {
+        didSet { UserDefaults.standard.set(monthlyBudgetUSD, forKey: Self.monthlyBudgetKey) }
+    }
+
     /// Fan-out the user's topic into 2-4 sub-queries before fetching.
     /// Costs one extra (cheap) LLM call per run. P4-9.
     @Published var queryRewritingEnabled: Bool {
@@ -135,6 +140,7 @@ final class AppState: ObservableObject {
     private(set) var pipeline: ReportPipeline?
 
     static let retentionDaysKey = "nowcast.retention_days"
+    static let monthlyBudgetKey = "nowcast.monthly_budget_usd"
     static let queryRewritingKey = "nowcast.query_rewriting_enabled"
     static let contradictionDetectionKey = "nowcast.contradiction_detection_enabled"
     static let entityExtractionKey = "nowcast.entity_extraction_enabled"
@@ -174,6 +180,7 @@ final class AppState: ObservableObject {
         self.smtpSettings = SMTPSettingsStore.shared.load()
         self.retentionDays = UserDefaults.standard.object(forKey: Self.retentionDaysKey) as? Int
             ?? Self.defaultRetentionDays
+        self.monthlyBudgetUSD = UserDefaults.standard.object(forKey: Self.monthlyBudgetKey) as? Double ?? 0
         self.queryRewritingEnabled = UserDefaults.standard.object(forKey: Self.queryRewritingKey) as? Bool ?? false
         self.contradictionDetectionEnabled = UserDefaults.standard.object(forKey: Self.contradictionDetectionKey) as? Bool ?? false
         self.entityExtractionEnabled = UserDefaults.standard.object(forKey: Self.entityExtractionKey) as? Bool ?? false
@@ -295,6 +302,16 @@ final class AppState: ObservableObject {
                              presetID: UUID?) async {
         guard let pipeline else {
             lastError = missingProviderMessage
+            return
+        }
+        // prod-14: refuse to run once the monthly spend cap is reached, so an
+        // aggressive/unattended schedule can't quietly rack up cost.
+        let monthSpend = (try? storage.spend(since: SpendGuard.monthStart(Date()))) ?? 0
+        if SpendGuard.isOverBudget(spentThisMonth: monthSpend, budget: monthlyBudgetUSD) {
+            lastError = String(
+                format: "Monthly spend cap reached ($%.2f of $%.2f). Raise or clear the cap in Settings → General → Cost guardrail to run again.",
+                monthSpend, monthlyBudgetUSD)
+            Log.pipeline.notice("blocked run: month spend $\(monthSpend, privacy: .public) >= cap $\(self.monthlyBudgetUSD, privacy: .public)")
             return
         }
         isGenerating = true
@@ -442,6 +459,12 @@ final class AppState: ObservableObject {
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    /// Recorded LLM spend (USD) so far this calendar month. Drives the spend
+    /// guardrail display.
+    func currentMonthSpend() -> Double {
+        (try? storage.spend(since: SpendGuard.monthStart(Date()))) ?? 0
     }
 
     /// Manual "Back up now". Returns the backup file URL on success.

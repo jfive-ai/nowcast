@@ -203,6 +203,16 @@ final class StorageManager {
         return stale.map(\.id)
     }
 
+    /// Total recorded LLM spend (USD) for reports generated at/after `since`.
+    /// Used by the monthly spend guardrail.
+    func spend(since: Date) throws -> Double {
+        try dbQueue.read { db in
+            try Double.fetchOne(db,
+                sql: "SELECT COALESCE(SUM(usd_cost), 0) FROM report WHERE generated_at >= ?",
+                arguments: [since]) ?? 0
+        }
+    }
+
     /// How many reports are older than `cutoff` (so callers can decide whether
     /// a destructive retention prune is about to remove anything).
     func reportCount(olderThan cutoff: Date) throws -> Int {
