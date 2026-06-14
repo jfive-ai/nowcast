@@ -239,8 +239,26 @@ struct SettingsView: View {
                         .monospacedDigit()
                 }
             }
+
+            Section("About") {
+                HStack {
+                    Text("Version")
+                    Spacer()
+                    Text(Self.appVersionString)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
         }
         .formStyle(.grouped)
+    }
+
+    /// "<short version> (<build>)" from the bundle, e.g. "0.0.1 (1)".
+    static var appVersionString: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "\(version) (\(build))"
     }
 
 #if DEBUG
