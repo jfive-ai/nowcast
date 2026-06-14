@@ -594,6 +594,26 @@ enum SelfCheck {
         check("prod-30: sourceReliability aggregates host mentions (got \(reliability.count) hosts)",
               reliability.contains { $0.host == "mock.example" && $0.mentions >= 1 })
 
+        // prod-41: per-kind subscription identifier validation.
+        check("prod-41: empty identifier rejected",
+              SubscriptionValidator.validationError(kind: .reddit, identifier: "  ") != nil)
+        check("prod-41: valid subreddit accepted",
+              SubscriptionValidator.validationError(kind: .reddit, identifier: "ethereum") == nil)
+        check("prod-41: subreddit with r/ prefix accepted",
+              SubscriptionValidator.validationError(kind: .reddit, identifier: "r/ethereum") == nil)
+        check("prod-41: RSS rejects non-URL",
+              SubscriptionValidator.validationError(kind: .rss, identifier: "not a url") != nil)
+        check("prod-41: RSS accepts https feed URL",
+              SubscriptionValidator.validationError(kind: .rss, identifier: "https://example.com/feed.xml") == nil)
+        check("prod-41: Nitter rejects a pasted URL",
+              SubscriptionValidator.validationError(kind: .xNitter, identifier: "https://x.com/vitalikbuterin") != nil)
+        check("prod-41: Nitter accepts @handle",
+              SubscriptionValidator.validationError(kind: .xNitter, identifier: "@vitalikbuterin") == nil)
+        check("prod-41: YouTube accepts channel id",
+              SubscriptionValidator.validationError(kind: .youtubeChannel, identifier: "UCabcdefghijklmnopqrstuv") == nil)
+        check("prod-41: YouTube accepts @handle",
+              SubscriptionValidator.validationError(kind: .youtubeChannel, identifier: "@bankless") == nil)
+
         // prod-14: monthly spend cap query + over-budget decision.
         check("prod-14: over budget when spent >= cap",
               SpendGuard.isOverBudget(spentThisMonth: 5.0, budget: 5.0))
