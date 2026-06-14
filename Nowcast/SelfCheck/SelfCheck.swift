@@ -594,6 +594,21 @@ enum SelfCheck {
         check("prod-30: sourceReliability aggregates host mentions (got \(reliability.count) hosts)",
               reliability.contains { $0.host == "mock.example" && $0.mentions >= 1 })
 
+        // prod-36: dangling entity_mention rows (cluster_id pointing at no
+        // cluster) are pruned; real mentions and the empty key are kept.
+        if let topEntity = (try? storage.topEntities(limit: 1))?.first {
+            let bogusCluster = "bogus-cluster-\(runID)"
+            try? storage.recordEntityMention(entityID: topEntity.id, reportID: report.id, clusterID: bogusCluster)
+            check("prod-36: dangling mention present before prune",
+                  (try? storage.entityMentionCount(clusterID: bogusCluster)) == 1)
+            try? storage.pruneDanglingEntityMentions()
+            check("prod-36: dangling mention pruned",
+                  (try? storage.entityMentionCount(clusterID: bogusCluster)) == 0)
+        }
+        check("prod-36: cluster key coerces nil to empty string",
+              StorageManager.entityMentionClusterKey(nil) == ""
+              && StorageManager.entityMentionClusterKey("c1") == "c1")
+
         // prod-41: per-kind subscription identifier validation.
         check("prod-41: empty identifier rejected",
               SubscriptionValidator.validationError(kind: .reddit, identifier: "  ") != nil)
