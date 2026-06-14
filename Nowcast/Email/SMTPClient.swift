@@ -23,42 +23,51 @@ struct SMTPClient {
 
     /// Send `message` to all `recipients` over a fresh TLS SMTP session.
     /// Throws on any protocol or I/O error; partial sends are not retried.
+    /// Overall deadline for the whole SMTP exchange. Without it a server that
+    /// completes TLS but then stalls in the data phase (overloaded /
+    /// greylisting servers, a firewall that drops the data phase) hangs the
+    /// email-digest task forever — `NWConnection` reads ignore task
+    /// cancellation, so `onTimeout: { conn.close() }` is what unblocks them.
+    static let exchangeTimeout: TimeInterval = 30
+
     func send(message: EmailMessage) async throws {
         let conn = try await SMTPConnection.open(host: config.host, port: config.port)
         defer { conn.close() }
 
-        // 220 banner
-        _ = try await conn.expect(code: 220)
+        try await withTimeout(seconds: Self.exchangeTimeout, onTimeout: { conn.close() }) {
+            // 220 banner
+            _ = try await conn.expect(code: 220)
 
-        try await conn.send("EHLO nowcast.local\r\n")
-        _ = try await conn.expect(code: 250)
-
-        try await conn.send("AUTH LOGIN\r\n")
-        _ = try await conn.expect(code: 334)
-
-        try await conn.send(Self.base64(config.username) + "\r\n")
-        _ = try await conn.expect(code: 334)
-
-        try await conn.send(Self.base64(config.password) + "\r\n")
-        _ = try await conn.expect(code: 235)
-
-        try await conn.send("MAIL FROM:<\(Self.sanitizeAddress(config.fromAddress))>\r\n")
-        _ = try await conn.expect(code: 250)
-
-        for rcpt in message.recipients {
-            try await conn.send("RCPT TO:<\(Self.sanitizeAddress(rcpt))>\r\n")
+            try await conn.send("EHLO nowcast.local\r\n")
             _ = try await conn.expect(code: 250)
+
+            try await conn.send("AUTH LOGIN\r\n")
+            _ = try await conn.expect(code: 334)
+
+            try await conn.send(Self.base64(config.username) + "\r\n")
+            _ = try await conn.expect(code: 334)
+
+            try await conn.send(Self.base64(config.password) + "\r\n")
+            _ = try await conn.expect(code: 235)
+
+            try await conn.send("MAIL FROM:<\(Self.sanitizeAddress(config.fromAddress))>\r\n")
+            _ = try await conn.expect(code: 250)
+
+            for rcpt in message.recipients {
+                try await conn.send("RCPT TO:<\(Self.sanitizeAddress(rcpt))>\r\n")
+                _ = try await conn.expect(code: 250)
+            }
+
+            try await conn.send("DATA\r\n")
+            _ = try await conn.expect(code: 354)
+
+            let body = Self.buildBody(config: config, message: message)
+            try await conn.send(body)
+            _ = try await conn.expect(code: 250)
+
+            try await conn.send("QUIT\r\n")
+            // Some servers don't send a 221 reply before closing. Don't be picky.
         }
-
-        try await conn.send("DATA\r\n")
-        _ = try await conn.expect(code: 354)
-
-        let body = Self.buildBody(config: config, message: message)
-        try await conn.send(body)
-        _ = try await conn.expect(code: 250)
-
-        try await conn.send("QUIT\r\n")
-        // Some servers don't send a 221 reply before closing. Don't be picky.
     }
 
     // MARK: - Message construction

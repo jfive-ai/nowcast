@@ -691,6 +691,20 @@ enum SelfCheck {
         check("Retry: jittered backoff stays within [0, maxDelay] (got \(jittered))",
               jittered >= 0 && jittered <= HTTPRetry.maxDelay)
 
+        // prod-25: withTimeout returns a fast op's value, throws on a slow op.
+        let fastResult = try? await withTimeout(seconds: 5) { 42 }
+        check("prod-25: withTimeout returns fast op result", fastResult == 42)
+        var timedOut = false
+        do {
+            _ = try await withTimeout(seconds: 0.05) {
+                try await Task.sleep(nanoseconds: 3_000_000_000)
+                return 1
+            }
+        } catch is TimeoutError {
+            timedOut = true
+        } catch {}
+        check("prod-25: withTimeout throws TimeoutError on a slow op", timedOut)
+
         lines.append("")
         lines.append("Final: \(passed ? "PASS" : "FAIL")  ·  report id: \(report.id.uuidString.prefix(8))")
         return Result(passed: passed, lines: lines)
