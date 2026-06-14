@@ -10,7 +10,7 @@ import Foundation
 /// title + description.
 enum TranscriptFetcher {
     static func fetch(videoId: String,
-                      session: URLSession = .shared) async throws -> String {
+                      session: URLSession = HTTPSessions.standard) async throws -> String {
         let html = try await fetchWatchPage(videoId: videoId, session: session)
         guard let track = pickEnglishTrack(in: html) else {
             throw TranscriptError.noTracks

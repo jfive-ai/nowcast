@@ -9,7 +9,7 @@ struct YouTubeSearchAdapter: SourceAdapter {
     private let session: URLSession
     private let apiKey: String
 
-    init(apiKey: String, session: URLSession = .shared) {
+    init(apiKey: String, session: URLSession = HTTPSessions.standard) {
         self.apiKey = apiKey
         self.session = session
     }

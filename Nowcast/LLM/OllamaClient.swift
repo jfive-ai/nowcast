@@ -11,7 +11,7 @@ struct OllamaClient: LLMClient {
     private let session: URLSession
 
     init(baseURL: URL = URL(string: "http://localhost:11434")!,
-         session: URLSession = .shared) {
+         session: URLSession = HTTPSessions.standard) {
         self.baseURL = baseURL
         self.session = session
     }

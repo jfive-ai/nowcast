@@ -7,7 +7,7 @@ struct HackerNewsAdapter: SourceAdapter {
     private let session: URLSession
     private let isoFormatter: ISO8601DateFormatter
 
-    init(session: URLSession = .shared) {
+    init(session: URLSession = HTTPSessions.standard) {
         self.session = session
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

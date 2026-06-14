@@ -16,7 +16,7 @@ struct YouTubeChannelAdapter: SourceAdapter {
     private let maxVideosPerChannel: Int
 
     init(apiKey: String,
-         session: URLSession = .shared,
+         session: URLSession = HTTPSessions.standard,
          maxVideosPerChannel: Int = 5) {
         self.apiKey = apiKey
         self.session = session

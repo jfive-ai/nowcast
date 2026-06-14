@@ -15,7 +15,7 @@ struct AnthropicClient: LLMClient {
     init(apiKey: String,
          baseURL: URL = URL(string: "https://api.anthropic.com/v1")!,
          apiVersion: String = "2023-06-01",
-         session: URLSession = .shared) {
+         session: URLSession = HTTPSessions.standard) {
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.apiVersion = apiVersion
