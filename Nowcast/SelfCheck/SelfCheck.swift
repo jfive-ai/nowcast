@@ -594,6 +594,27 @@ enum SelfCheck {
         check("prod-30: sourceReliability aggregates host mentions (got \(reliability.count) hosts)",
               reliability.contains { $0.host == "mock.example" && $0.mentions >= 1 })
 
+        // prod-46: reconcileFullTextIndex drops orphan FTS rows (parent report
+        // gone) but keeps valid ones.
+        func reportFTSCount(_ reportID: String) -> Int {
+            (try? storage.dbQueue.read { db in
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM report_fts WHERE report_id = ?",
+                                 arguments: [reportID]) ?? 0
+            }) ?? -1
+        }
+        let orphanFTSID = "orphan-fts-\(runID)"
+        try? await storage.dbQueue.write { db in
+            try db.execute(sql: "INSERT INTO report_fts (report_id, topic, body) VALUES (?, ?, ?)",
+                           arguments: [orphanFTSID, "orphan topic", "orphan body \(runID)"])
+        }
+        check("prod-46: orphan report_fts row present before reconcile",
+              reportFTSCount(orphanFTSID) == 1)
+        try? storage.reconcileFullTextIndex()
+        check("prod-46: orphan report_fts row removed after reconcile",
+              reportFTSCount(orphanFTSID) == 0)
+        check("prod-46: valid report_fts row survives reconcile",
+              reportFTSCount(report.id.uuidString) == 1)
+
         // prod-22: HTTP failures map to the right SourceError category.
         check("prod-22: 429 → rateLimited (actionable)", {
             if case .rateLimited = SourceError.from(status: 429, kind: .reddit) { return true }
