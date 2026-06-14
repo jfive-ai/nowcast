@@ -29,7 +29,11 @@ enum SubscriptionValidator {
             return nil
 
         case .reddit:
-            let name = id.lowercased().hasPrefix("r/") ? String(id.dropFirst(2)) : id
+            // Mirror RedditAdapter.normalizeSubreddit: accept a leading "/"
+            // and/or an "r/" prefix (e.g. "/r/ethereum" pasted from a URL).
+            var name = id
+            if name.hasPrefix("/") { name.removeFirst() }
+            if name.lowercased().hasPrefix("r/") { name = String(name.dropFirst(2)) }
             guard !name.isEmpty, name.allSatisfy(Self.isHandleChar) else {
                 return "Enter a subreddit name like ethereum."
             }

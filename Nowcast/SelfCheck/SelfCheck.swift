@@ -601,6 +601,8 @@ enum SelfCheck {
               SubscriptionValidator.validationError(kind: .reddit, identifier: "ethereum") == nil)
         check("prod-41: subreddit with r/ prefix accepted",
               SubscriptionValidator.validationError(kind: .reddit, identifier: "r/ethereum") == nil)
+        check("prod-41: subreddit pasted as /r/ethereum accepted (adapter parity)",
+              SubscriptionValidator.validationError(kind: .reddit, identifier: "/r/ethereum") == nil)
         check("prod-41: RSS rejects non-URL",
               SubscriptionValidator.validationError(kind: .rss, identifier: "not a url") != nil)
         check("prod-41: RSS accepts https feed URL",
