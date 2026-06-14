@@ -6,6 +6,11 @@ import SwiftUI
 ///   - Semantic (NLEmbedding, P8-1) — cosine similarity over per-report
 ///     sentence embeddings. Finds briefs by *meaning* even when the user
 ///     can't recall the exact phrasing.
+/// `@MainActor`-isolated so the debounced search `Task` (in `schedule()`)
+/// inherits main isolation: the heavy DB/cosine work still runs off-main inside
+/// `AppState.*Async`'s `Task.detached`, but the `@State` result assignments
+/// resume on the main thread (prod-29 review fix).
+@MainActor
 struct SearchView: View {
     @EnvironmentObject private var state: AppState
 
