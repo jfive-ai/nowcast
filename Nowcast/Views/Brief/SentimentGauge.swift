@@ -65,6 +65,7 @@ struct SentimentGauge: View {
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Coverage tone: \(label), \(String(format: "%+.1f", clamped))")
+        .accessibilityValue((rationale?.isEmpty == false) ? (rationale ?? "") : "")
     }
 
     private var gauge: some View {
