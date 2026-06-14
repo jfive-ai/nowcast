@@ -570,8 +570,14 @@ final class AppState: ObservableObject {
 
     // MARK: - Search (P4-6)
 
-    func searchReports(_ query: String) -> [StorageManager.SearchHit] {
-        (try? storage.searchReports(query)) ?? []
+    /// Off-main keyword search (prod-29) so the FTS query + JOIN don't block the
+    /// UI while the user types. dbQueue serializes access, so running it on a
+    /// background task is safe.
+    func searchReportsAsync(_ query: String) async -> [StorageManager.SearchHit] {
+        let storage = self.storage
+        return await Task.detached(priority: .userInitiated) {
+            (try? storage.searchReports(query)) ?? []
+        }.value
     }
 
     // MARK: - Semantic search (P8-1)
@@ -592,26 +598,31 @@ final class AppState: ObservableObject {
     /// state instead of a "no results" wall.
     var semanticSearchAvailable: Bool { ReportEmbedder.shared.isAvailable }
 
-    func semanticSearch(_ query: String, limit: Int = 25) -> [SemanticHit] {
+    /// Off-main semantic search (prod-29): the embed read + O(N·dim) cosine
+    /// loop run on a background task so a large archive doesn't freeze typing.
+    /// The report metadata is snapshotted on the main actor first.
+    func semanticSearchAsync(_ query: String, limit: Int = 25) async -> [SemanticHit] {
         let cleaned = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty,
               let queryVector = ReportEmbedder.shared.embed(cleaned)
         else { return [] }
-        guard let vectors = try? storage.allEmbeddings(), !vectors.isEmpty else { return [] }
-
         let reportByID = Dictionary(uniqueKeysWithValues: reports.map { ($0.id, $0) })
-        let scored: [SemanticHit] = vectors.compactMap { entry in
-            guard let report = reportByID[entry.reportID] else { return nil }
-            let score = ReportEmbedder.similarity(queryVector, entry.vector)
-            return SemanticHit(
-                reportID: report.id,
-                topic: report.topic,
-                title: report.title,
-                generatedAt: report.generatedAt,
-                score: score
-            )
-        }
-        return Array(scored.sorted { $0.score > $1.score }.prefix(limit))
+        let storage = self.storage
+        return await Task.detached(priority: .userInitiated) {
+            guard let vectors = try? storage.allEmbeddings(), !vectors.isEmpty else { return [] }
+            let scored: [SemanticHit] = vectors.compactMap { entry in
+                guard let report = reportByID[entry.reportID] else { return nil }
+                let score = ReportEmbedder.similarity(queryVector, entry.vector)
+                return SemanticHit(
+                    reportID: report.id,
+                    topic: report.topic,
+                    title: report.title,
+                    generatedAt: report.generatedAt,
+                    score: score
+                )
+            }
+            return Array(scored.sorted { $0.score > $1.score }.prefix(limit))
+        }.value
     }
 
     // MARK: - Big story (P8-2)
