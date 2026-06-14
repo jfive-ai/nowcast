@@ -1263,6 +1263,14 @@ final class StorageManager {
     /// new (entity, report, cluster) tuple), via `changes()` inside the
     /// same write transaction. Prevents the counter from drifting above
     /// the real mention count when extraction re-runs.
+    /// The `entity_mention.cluster_id` value for an optional cluster id.
+    /// entity_mention's PK includes cluster_id, and SQLite treats NULL as
+    /// distinct in a unique key — so a nil would let `INSERT OR IGNORE`
+    /// duplicate a report-level mention and drift `mention_count`. We coerce
+    /// nil to "" (report-level sentinel) through this single helper so every
+    /// caller agrees on the key.
+    static func entityMentionClusterKey(_ clusterID: String?) -> String { clusterID ?? "" }
+
     func recordEntityMention(entityID: UUID, reportID: UUID, clusterID: String?) throws {
         try dbQueue.write { db in
             try db.execute(sql: """
@@ -1271,7 +1279,7 @@ final class StorageManager {
                 """, arguments: [
                     entityID.uuidString,
                     reportID.uuidString,
-                    clusterID ?? "",
+                    Self.entityMentionClusterKey(clusterID),
                 ])
             // SQLite's `changes()` returns 1 when the INSERT actually
             // wrote a row, 0 when OR IGNORE skipped it.
@@ -1282,6 +1290,33 @@ final class StorageManager {
                     WHERE id = ?
                     """, arguments: [entityID.uuidString])
             }
+        }
+    }
+
+    /// Repair pass: drop `entity_mention` rows whose non-empty `cluster_id`
+    /// references a cluster that no longer exists (entity_mention has no FK to
+    /// cluster), then recompute every entity's `mention_count` from the
+    /// surviving rows so the counter can't have drifted (prod-36). The empty
+    /// "" key (report-level mention) is always kept.
+    func pruneDanglingEntityMentions() throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                DELETE FROM entity_mention
+                WHERE cluster_id <> '' AND cluster_id NOT IN (SELECT id FROM cluster)
+                """)
+            try db.execute(sql: """
+                UPDATE entity SET mention_count =
+                    (SELECT COUNT(*) FROM entity_mention WHERE entity_id = entity.id)
+                """)
+        }
+    }
+
+    /// Count of `entity_mention` rows with the given `cluster_id`.
+    /// (Diagnostics / self-check.)
+    func entityMentionCount(clusterID: String) throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM entity_mention WHERE cluster_id = ?",
+                             arguments: [clusterID]) ?? 0
         }
     }
 

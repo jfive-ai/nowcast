@@ -235,6 +235,17 @@ final class AppState: ObservableObject {
         // P8-2: backfill big-story scores for reports that pre-dated v15.
         // Same detached pattern; pure DB work, no network.
         backfillBigStoryScoresIfNeeded()
+
+        // prod-36: repair any entity_mention rows whose cluster_id points at a
+        // cluster that was filtered out / never saved, and recompute counts.
+        repairEntityMentionsIfNeeded()
+    }
+
+    /// One-shot launch repair for dangling entity mentions (prod-36).
+    func repairEntityMentionsIfNeeded() {
+        Task.detached { [storage] in
+            try? storage.pruneDanglingEntityMentions()
+        }
     }
 
     // MARK: - Settings
