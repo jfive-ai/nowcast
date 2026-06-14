@@ -15,7 +15,7 @@ struct NewsAdapter: SourceAdapter {
     private let session: URLSession
     private let locale: String
 
-    init(session: URLSession = .shared, locale: String = "en-US") {
+    init(session: URLSession = HTTPSessions.standard, locale: String = "en-US") {
         self.session = session
         self.locale = locale
     }

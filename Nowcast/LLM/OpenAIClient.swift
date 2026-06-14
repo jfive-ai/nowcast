@@ -10,7 +10,7 @@ struct OpenAIClient: LLMClient {
 
     init(apiKey: String,
          baseURL: URL = URL(string: "https://api.openai.com/v1")!,
-         session: URLSession = .shared) {
+         session: URLSession = HTTPSessions.llm) {
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.session = session

@@ -14,7 +14,7 @@ struct RedditAdapter: SourceAdapter {
     private let session: URLSession
     private let userAgent: String
 
-    init(session: URLSession = .shared,
+    init(session: URLSession = HTTPSessions.standard,
          userAgent: String = "Nowcast/0.1 (macOS; +https://github.com/jfive-ai/nowcast)") {
         self.session = session
         self.userAgent = userAgent
