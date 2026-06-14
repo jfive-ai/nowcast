@@ -54,9 +54,12 @@ final class BackgroundScheduler {
         // firing closure. If the user edits the preset, `reschedule(_:)`
         // cancels and re-registers with the new value, so a stale capture
         // here is replaced before it can fire.
+        Log.scheduler.info("preset \(preset.id.uuidString, privacy: .public) armed to fire in ~\(Int(interval), privacy: .public)s")
+
         let capturedPreset = preset
         activity.schedule { [weak self] completion in
             Task { @MainActor in
+                Log.scheduler.info("preset \(capturedPreset.id.uuidString, privacy: .public) fired")
                 await self?.onFire?(capturedPreset.id)
                 completion(.finished)
                 // Re-arm the same preset so hourly/daily/weekly cadences

@@ -253,7 +253,7 @@ final class AppState: ObservableObject {
     /// One-shot launch repair for dangling entity mentions (prod-36).
     func repairEntityMentionsIfNeeded() {
         Task.detached { [storage] in
-            try? storage.pruneDanglingEntityMentions()
+            logged(Log.storage, "entity-mention repair") { try storage.pruneDanglingEntityMentions() }
         }
     }
 

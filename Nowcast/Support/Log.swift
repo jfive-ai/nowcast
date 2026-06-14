@@ -22,3 +22,16 @@ enum Log {
     static let delivery = Logger(subsystem: subsystem, category: "delivery")
     static let spotlight = Logger(subsystem: subsystem, category: "spotlight")
 }
+
+/// Runs `body`, and on a thrown error logs a redacted breadcrumb to `logger`
+/// and returns nil instead of silently swallowing it. Use in place of a bare
+/// `try?` where a failure is worth a trace (prod-32).
+@discardableResult
+func logged<T>(_ logger: Logger, _ context: String, _ body: () throws -> T) -> T? {
+    do {
+        return try body()
+    } catch {
+        logger.error("\(context, privacy: .public) failed: \(error.redactedDescription, privacy: .public)")
+        return nil
+    }
+}

@@ -668,6 +668,14 @@ enum SelfCheck {
         check("prod-33: page WITH captionTracks is never an interstitial",
               !TranscriptFetcher.isInterstitial("<html>consent.youtube.com but also \"captionTracks\":[...]</html>"))
 
+        // prod-32: logged() returns the value on success, nil (no crash) on throw.
+        check("prod-32: logged() returns the value on success",
+              logged(Log.app, "selfcheck-ok") { 42 } == 42)
+        check("prod-32: logged() returns nil on a thrown error",
+              logged(Log.app, "selfcheck-throw") { () throws -> Int in
+                  throw NSError(domain: "selfcheck", code: 1)
+              } == nil)
+
         // prod-22: HTTP failures map to the right SourceError category.
         check("prod-22: 429 → rateLimited (actionable)", {
             if case .rateLimited = SourceError.from(status: 429, kind: .reddit) { return true }
