@@ -14,19 +14,40 @@ import GRDB
 @MainActor
 enum SelfCheck {
     struct Result {
+        struct Check { let label: String; let passed: Bool }
         let passed: Bool
         let lines: [String]
+        let checks: [Check]
         var summary: String { lines.joined(separator: "\n") }
+
+        /// Machine-readable summary for CI parsing (prod-27). Emitted to stdout
+        /// by the headless runner when NOWCAST_SELF_CHECK_JSON=1.
+        var jsonSummary: String {
+            let dict: [String: Any] = [
+                "passed": passed,
+                "total": checks.count,
+                "failed": checks.filter { !$0.passed }.count,
+                "checks": checks.map { ["label": $0.label, "passed": $0.passed] },
+            ]
+            guard let data = try? JSONSerialization.data(
+                    withJSONObject: dict, options: [.prettyPrinted, .sortedKeys]),
+                  let str = String(data: data, encoding: .utf8) else {
+                return "{\"passed\": \(passed)}"
+            }
+            return str
+        }
     }
 
     /// Runs against the *real* StorageManager so the user can inspect the
     /// resulting rows in the Settings → Storage panel afterwards.
     static func run(storage: StorageManager) async -> Result {
         var lines: [String] = []
+        var checks: [Result.Check] = []
         var passed = true
 
         func check(_ label: String, _ condition: Bool) {
             lines.append("\(condition ? "✓" : "✗") \(label)")
+            checks.append(Result.Check(label: label, passed: condition))
             if !condition { passed = false }
         }
 
@@ -88,7 +109,11 @@ enum SelfCheck {
                 }
             )
         } catch {
-            return Result(passed: false, lines: ["✗ Pipeline.generate threw: \(error.localizedDescription)"])
+            return Result(
+                passed: false,
+                lines: ["✗ Pipeline.generate threw: \(error.localizedDescription)"],
+                checks: [Result.Check(label: "Pipeline.generate threw: \(error.localizedDescription)", passed: false)]
+            )
         }
 
         // P4-1: items + report_item links
@@ -788,7 +813,7 @@ enum SelfCheck {
 
         lines.append("")
         lines.append("Final: \(passed ? "PASS" : "FAIL")  ·  report id: \(report.id.uuidString.prefix(8))")
-        return Result(passed: passed, lines: lines)
+        return Result(passed: passed, lines: lines, checks: checks)
     }
 
     /// Pure-data version of `AppState.semanticSearch` for the self-check.

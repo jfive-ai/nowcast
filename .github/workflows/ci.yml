@@ -64,5 +64,6 @@ jobs:
           APP="$DERIVED/Build/Products/Debug/Nowcast.app/Contents/MacOS/Nowcast"
           test -x "$APP" || { echo "Built binary not found at $APP"; exit 1; }
           export NOWCAST_SELF_CHECK=1
+          export NOWCAST_SELF_CHECK_JSON=1
           export NOWCAST_SUPPORT_DIR="$RUNNER_TEMP/nowcast-selfcheck"
           "$APP"

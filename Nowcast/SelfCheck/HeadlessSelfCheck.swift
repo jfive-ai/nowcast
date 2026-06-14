@@ -38,9 +38,11 @@ enum HeadlessSelfCheck {
                 let result = await SelfCheck.run(storage: storage)
                 outcome.passed = result.passed
                 outcome.summary = result.summary
+                outcome.jsonSummary = result.jsonSummary
             } catch {
                 outcome.passed = false
                 outcome.summary = "✗ StorageManager init failed: \(error)"
+                outcome.jsonSummary = "{\"passed\": false, \"error\": \"StorageManager init failed\"}"
             }
         }
 
@@ -50,9 +52,14 @@ enum HeadlessSelfCheck {
             RunLoop.main.run(mode: .default, before: Date(timeIntervalSinceNow: 0.05))
         }
 
+        // Human-readable summary → stderr; machine-readable JSON → stdout when
+        // requested (prod-27), so CI can parse per-check results.
         let banner = "\n=== Nowcast headless self-check ===\n"
         FileHandle.standardError.write(Data(banner.utf8))
         FileHandle.standardError.write(Data((outcome.summary + "\n").utf8))
+        if ProcessInfo.processInfo.environment["NOWCAST_SELF_CHECK_JSON"] == "1" {
+            FileHandle.standardOutput.write(Data((outcome.jsonSummary + "\n").utf8))
+        }
         exit(outcome.passed ? 0 : 1)
     }
 
@@ -64,6 +71,7 @@ enum HeadlessSelfCheck {
         var finished = false
         var passed = false
         var summary = ""
+        var jsonSummary = ""
     }
 }
 #endif
