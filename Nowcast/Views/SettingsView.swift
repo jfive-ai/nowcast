@@ -166,6 +166,9 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                Text(pipelineCostFooter)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 #if DEBUG
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -406,6 +409,17 @@ struct SettingsView: View {
         // Revert the field to the authoritative value — discards non-numeric or
         // negative input (which previously stuck in the field with no effect).
         draftRetention = String(state.retentionDays)
+    }
+
+    private var pipelineCostFooter: String {
+        let calls = state.pipelineCallCount
+        let base = "Up to \(calls) LLM call\(calls == 1 ? "" : "s") per report with current options."
+        if let cost = state.estimatedCostPerReport(), cost > 0 {
+            // A sub-cent estimate must not render as "$0.00" (reads as free).
+            let costStr = cost < 0.01 ? "< $0.01" : String(format: "$%.2f", cost)
+            return base + " ≈ \(costStr)/report at the current model (rough)."
+        }
+        return base + " Pricing unknown for the selected model."
     }
 
     private func commitBudget() {

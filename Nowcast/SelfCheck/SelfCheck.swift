@@ -694,6 +694,16 @@ enum SelfCheck {
             _ = try? storage.deleteReports(ids: [storedBudget.id])
         }
 
+        // prod-34: forward-looking cost estimate scales with call count and
+        // is nil for unknown models.
+        let est1 = ModelPricing.estimate(model: "gpt-4o-mini", calls: 1, avgPromptTokens: 4000, avgCompletionTokens: 1000)
+        let est3 = ModelPricing.estimate(model: "gpt-4o-mini", calls: 3, avgPromptTokens: 4000, avgCompletionTokens: 1000)
+        check("prod-34: estimate is positive for a known model", (est1 ?? 0) > 0)
+        check("prod-34: estimate scales linearly with call count",
+              { if let est1, let est3 { return abs(est3 - est1 * 3) < 1e-9 }; return false }())
+        check("prod-34: estimate is nil for an unknown model",
+              ModelPricing.estimate(model: "totally-unknown-xyz", calls: 2, avgPromptTokens: 1000, avgCompletionTokens: 500) == nil)
+
         // prod-15: backupDatabase writes a consistent, valid SQLite copy.
         // Use a high maxBackups so this never prunes a user's real backups
         // (the Settings-button self-check shares this code path).
