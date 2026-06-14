@@ -382,7 +382,24 @@ final class StorageManager {
     /// fresh migration or after a bug emptied them). Idempotent.
     /// FIX (codex review PR #31): backfill historical reports that
     /// pre-existed the v8 migration so they're searchable immediately.
+    /// Reverse reconcile: drop FTS rows whose parent report/item no longer
+    /// exists. The delete path already cleans these, but a report/item that
+    /// vanished another way (migration drift, manual DB edit) would leave an
+    /// orphan FTS row that surfaces as a stale search hit with an empty detail
+    /// view. Cheap, idempotent (prod-46).
+    func reconcileFullTextIndex() throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM report_fts WHERE report_id NOT IN (SELECT id FROM report)")
+            try db.execute(sql: "DELETE FROM item_fts WHERE item_id NOT IN (SELECT id FROM item)")
+        }
+    }
+
     func backfillFullTextIndexIfNeeded() throws {
+        // prod-46: prune orphaned FTS rows first so the index is consistent in
+        // BOTH directions after this runs (the forward backfill below adds
+        // missing rows; this removes stale ones).
+        try? reconcileFullTextIndex()
+
         // Phase 1: discover what needs backfilling (read-only).
         struct PendingReport { let id: String; let topic: String; let path: String }
         struct PendingItem { let id: String; let title: String; let snippet: String }
