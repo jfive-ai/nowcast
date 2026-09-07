@@ -40,7 +40,9 @@ struct NowcastApp: App {
                 .environmentObject(audioPlayer)
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: "newspaper")
+                Image("MenuBarIcon")
+                    .renderingMode(.template)
+                    .accessibilityLabel("Nowcast")
                 if state.unreadCount > 0 {
                     Text("\(state.unreadCount)")
                         .font(.caption)
