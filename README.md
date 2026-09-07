@@ -29,8 +29,16 @@ Each phase ships as a separate PR against `main` from a `phase/<n>-<slug>` branc
 
 ## Testing & CI
 
-There is no XCTest target yet; the regression net is an in-app `SelfCheck`
-harness that runs the production `ReportPipeline` against a real database with
+The hostless `NowcastTests` XCTest target exercises pure production logic without
+launching the app, touching the Keychain, or opening a database:
+
+```bash
+xcodegen generate
+xcodebuild test -scheme NowcastTests -destination 'platform=macOS'
+```
+
+`xcodebuild test -scheme Nowcast` also includes these tests alongside the app build.
+The integration regression net is an in-app `SelfCheck` harness that runs the production `ReportPipeline` against a real database with
 a mock LLM and asserts every persisted artifact materialized correctly.
 
 Run it headlessly (DEBUG builds only):
