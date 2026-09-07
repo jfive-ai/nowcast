@@ -10,6 +10,8 @@ struct CompareReportsView: View {
     let left: Report
     let right: Report
 
+    @ScaledMetric(relativeTo: .caption2) private var glyphSize = 24.0
+
     @State private var leftMarkdown: String = ""
     @State private var rightMarkdown: String = ""
     @State private var leftIndex: [String: PersistedItem] = [:]
@@ -115,15 +117,17 @@ struct CompareReportsView: View {
         HStack(spacing: Theme.Spacing.sm) {
             RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous)
                 .fill(TopicGlyph.tint(for: report.topic).opacity(0.16))
-                .frame(width: 24, height: 24)
+                .frame(width: glyphSize, height: glyphSize)
                 .overlay(
                     Image(systemName: TopicGlyph.symbol(for: report.topic))
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(.caption2.weight(.semibold))
                         .foregroundStyle(TopicGlyph.tint(for: report.topic))
                         .accessibilityHidden(true)
                 )
             VStack(alignment: .leading, spacing: 1) {
-                Text(report.displayTitle).font(.subheadline.bold()).lineLimit(1)
+                Text(report.displayTitle)
+                    .font(.subheadline.bold())
+                    .fixedSize(horizontal: false, vertical: true)
                 Text(report.generatedAt.formatted(date: .abbreviated, time: .shortened))
                     .font(.caption2).foregroundStyle(.secondary)
             }

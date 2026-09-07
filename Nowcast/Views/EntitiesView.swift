@@ -112,7 +112,7 @@ struct EntitiesView: View {
     private var emptyState: some View {
         VStack(spacing: 8) {
             Image(systemName: "circle.grid.cross")
-                .font(.system(size: 36))
+                .font(.largeTitle)
                 .foregroundStyle(.secondary)
                 .accessibilityHidden(true)
             Text("No entities yet")

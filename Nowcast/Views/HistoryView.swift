@@ -57,6 +57,8 @@ private struct HistoryRow: View {
     let report: Report
     let isBigStory: Bool
 
+    @ScaledMetric(relativeTo: .caption) private var glyphSize = 26.0
+
     private var tint: Color { TopicGlyph.tint(for: report.topic) }
 
     var body: some View {
@@ -116,10 +118,10 @@ private struct HistoryRow: View {
     private var glyph: some View {
         RoundedRectangle(cornerRadius: Theme.Radius.sm, style: .continuous)
             .fill(tint.opacity(0.16))
-            .frame(width: 26, height: 26)
+            .frame(width: glyphSize, height: glyphSize)
             .overlay(
                 Image(systemName: TopicGlyph.symbol(for: report.topic))
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(tint)
                     .accessibilityHidden(true)
             )

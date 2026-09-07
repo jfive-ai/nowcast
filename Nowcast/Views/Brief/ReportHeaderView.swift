@@ -6,6 +6,8 @@ import SwiftUI
 struct ReportHeaderView: View {
     let report: Report
 
+    @ScaledMetric(relativeTo: .title2) private var glyphSize = 44.0
+
     private var tint: Color { TopicGlyph.tint(for: report.topic) }
 
     var body: some View {
@@ -38,10 +40,10 @@ struct ReportHeaderView: View {
     private var glyph: some View {
         RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
             .fill(tint.opacity(0.16))
-            .frame(width: 44, height: 44)
+            .frame(width: glyphSize, height: glyphSize)
             .overlay(
                 Image(systemName: TopicGlyph.symbol(for: report.topic))
-                    .font(.system(size: 20, weight: .semibold))
+                    .font(.title2.weight(.semibold))
                     .foregroundStyle(tint)
                     .accessibilityHidden(true)
             )
