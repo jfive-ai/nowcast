@@ -1,4 +1,5 @@
 """Workflow tests use fake platform tools; they never submit to Apple."""
+import base64
 import json
 import os
 from pathlib import Path
@@ -45,6 +46,8 @@ class NotarizeTests(unittest.TestCase):
         self.env = dict(os.environ, PATH=f"{tools}:{os.environ['PATH']}",
                         NOWCAST_DEVELOPMENT_TEAM='ABCDE12345', NOWCAST_NOTARY_PROFILE='test-profile',
                         NOWCAST_RELEASE_VERSION='1.2.0', NOWCAST_BUILD_NUMBER='42',
+                        NOWCAST_APPCAST_URL='https://example.com/appcast.xml',
+                        NOWCAST_SPARKLE_PUBLIC_KEY=base64.b64encode(bytes([1] * 32)).decode(),
                         NOWCAST_RELEASE_DIR=str(self.root / 'release'), MOCK_TRACE=str(self.trace))
 
     def run_script(self, *args):
@@ -96,6 +99,15 @@ class NotarizeTests(unittest.TestCase):
         archive = next(c for c in calls if c[0] == 'xcodebuild' and 'archive' in c)
         self.assertIn('MARKETING_VERSION=1.2.0', archive)
         self.assertIn('CURRENT_PROJECT_VERSION=42', archive)
+
+    def test_release_rejects_insecure_or_unconfigured_updater(self):
+        self.env['NOWCAST_APPCAST_URL'] = 'http://example.com/appcast.xml'
+        self.assertNotEqual(self.run_script('--validate-config').returncode, 0)
+        self.assertEqual(self.calls(), [])
+        self.env['NOWCAST_APPCAST_URL'] = 'https://example.com/appcast.xml'
+        self.env['NOWCAST_SPARKLE_PUBLIC_KEY'] = 'invalid'
+        self.assertNotEqual(self.run_script('--validate-config').returncode, 0)
+        self.assertEqual(self.calls(), [])
 
     def test_existing_output_is_not_overwritten(self):
         (self.root / 'release').mkdir()

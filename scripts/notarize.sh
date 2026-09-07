@@ -10,6 +10,8 @@ Required environment:
   NOWCAST_NOTARY_PROFILE    Existing notarytool Keychain profile name
   NOWCAST_RELEASE_VERSION   User-visible version (for example 1.2.0)
   NOWCAST_BUILD_NUMBER      Monotonically increasing integer build number
+  NOWCAST_APPCAST_URL       HTTPS URL of the hosted Sparkle appcast
+  NOWCAST_SPARKLE_PUBLIC_KEY  Base64 Ed25519 public key (32 bytes)
 Optional:
   NOWCAST_RELEASE_DIR       New output directory (default build/release-<build>)
 
@@ -29,6 +31,19 @@ esac
 [[ -n "${NOWCAST_NOTARY_PROFILE:-}" ]] || fail 'Set NOWCAST_NOTARY_PROFILE to an existing notarytool Keychain profile name.'
 [[ "${NOWCAST_RELEASE_VERSION:-}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]] || fail 'Set NOWCAST_RELEASE_VERSION to a numeric version, such as 1.2.0.'
 [[ "${NOWCAST_BUILD_NUMBER:-}" =~ ^[1-9][0-9]*$ ]] || fail 'Set NOWCAST_BUILD_NUMBER to a positive, increasing integer.'
+python3 - <<'PYCONFIG'
+import base64, os
+from urllib.parse import urlsplit
+url = urlsplit(os.environ.get('NOWCAST_APPCAST_URL', ''))
+if url.scheme != 'https' or not url.hostname or url.username or url.password:
+    raise SystemExit('Set NOWCAST_APPCAST_URL to an HTTPS feed URL without credentials.')
+try:
+    key = base64.b64decode(os.environ.get('NOWCAST_SPARKLE_PUBLIC_KEY', ''), validate=True)
+except ValueError:
+    raise SystemExit('NOWCAST_SPARKLE_PUBLIC_KEY must be a base64 Ed25519 public key.')
+if len(key) != 32:
+    raise SystemExit('NOWCAST_SPARKLE_PUBLIC_KEY must decode to 32 bytes.')
+PYCONFIG
 [[ "${1:-}" != --validate-config ]] || { printf 'Release configuration is valid.\n'; exit 0; }
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
@@ -65,6 +80,7 @@ xcodebuild -project Nowcast.xcodeproj -scheme Nowcast -configuration Release \
   -archivePath "$release_dir/Nowcast.xcarchive" \
   DEVELOPMENT_TEAM="$NOWCAST_DEVELOPMENT_TEAM" \
   MARKETING_VERSION="$NOWCAST_RELEASE_VERSION" CURRENT_PROJECT_VERSION="$NOWCAST_BUILD_NUMBER" \
+  NOWCAST_APPCAST_URL="$NOWCAST_APPCAST_URL" NOWCAST_SPARKLE_PUBLIC_KEY="$NOWCAST_SPARKLE_PUBLIC_KEY" \
   archive
 # Archive/export signs nested frameworks and XPC services correctly. Do not
 # replace it with codesign --deep, which can overwrite helper entitlements.

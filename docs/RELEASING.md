@@ -50,3 +50,54 @@ mocked workflow tests do not establish notarization success.
 
 References: [Apple notarization](https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution),
 [Sparkle archive/export signing guidance](https://sparkle-project.org/documentation/sandboxing/).
+
+## Sparkle automatic updates
+
+The app uses Sparkle 2.9.6 with its installer XPC service and sandbox Mach lookup
+entitlements. Debug builds with no update configuration never start the updater;
+the menu item is disabled. The headless runner exits before constructing it.
+
+Resolve the Swift package, then locate Sparkle's tools under
+`<DerivedData>/SourcePackages/artifacts/sparkle/Sparkle/bin/`. Run `generate_keys`
+once to store an Ed25519 private key in your login Keychain. Record the printed
+**public** key; keep the private key backed up using Sparkle's documented process.
+Never commit or paste the private key into a PR or shell command.
+
+Set these additional non-secret release values before running `notarize.sh`:
+
+```bash
+export NOWCAST_APPCAST_URL=https://your-update-host.example/updates/appcast.xml
+export NOWCAST_SPARKLE_PUBLIC_KEY='<your base64 public key>'
+```
+
+These are placeholders for your actual hosted feed and key, not a working update
+service. Release input validation requires HTTPS and a 32-byte public key.
+Xcode expands them into `SUFeedURL` and `SUPublicEDKey` in the built app.
+The archive/export workflow also signs Sparkle's nested helpers.
+
+Put notarized release ZIPs in a staging directory and generate the signed feed:
+
+```bash
+export SPARKLE_BIN_DIR='<DerivedData>/SourcePackages/artifacts/sparkle/Sparkle/bin'
+export NOWCAST_DOWNLOAD_URL_PREFIX=https://your-update-host.example/updates/
+scripts/generate-appcast.sh build/updates
+```
+
+The generator reads the private key from Keychain and writes the appcast/deltas.
+The wrapper rejects missing feeds and enclosures without well-formed Ed25519
+signature metadata, including Sparkle's successful-exit/public-key-mismatch case.
+This metadata check does not replace cryptographic verification during staging.
+Publish the generated feed at `NOWCAST_APPCAST_URL` and its archives/deltas at the
+matching download prefix. The script does not upload or enable hosting.
+
+Before public distribution, use two genuine Developer ID signed and notarized
+versions with increasing build numbers on a staging HTTPS feed. In the older
+app, select **Check for Updates…**, then verify detection, download, signature
+validation, installation, restart into the newer build, and sandbox operation.
+Also test a tampered archive is rejected. Local configuration/self-check tests
+cannot establish that full install path. Hosting, key provisioning, and this
+end-to-end validation remain release requirements.
+
+Sources: [Sparkle setup](https://sparkle-project.org/documentation/),
+[SwiftUI integration](https://sparkle-project.org/documentation/programmatic-setup/),
+[sandbox requirements](https://sparkle-project.org/documentation/sandboxing/).
