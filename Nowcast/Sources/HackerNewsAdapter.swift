@@ -5,13 +5,9 @@ struct HackerNewsAdapter: SourceAdapter {
     let kind: SourceKind = .hackerNews
 
     private let session: URLSession
-    private let isoFormatter: ISO8601DateFormatter
 
     init(session: URLSession = HTTPSessions.standard) {
         self.session = session
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        self.isoFormatter = f
     }
 
     func fetch(query: String,
@@ -30,7 +26,7 @@ struct HackerNewsAdapter: SourceAdapter {
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await BoundedFetch.data(for: request, session: session)
         guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .hackerNews)
         }
@@ -39,6 +35,11 @@ struct HackerNewsAdapter: SourceAdapter {
         }
         let parsed = try JSONDecoder().decode(HNResponse.self, from: data)
 
+        // Formatters belong to this fetch; concurrent requests share no mutable parser.
+        let isoFormatter = ISO8601DateFormatter()
+        isoFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let fallbackFormatter = ISO8601DateFormatter()
+        fallbackFormatter.formatOptions = [.withInternetDateTime]
         return parsed.hits.compactMap { hit in
             let title = hit.title ?? hit.story_title
             let urlString = hit.url ?? hit.story_url
@@ -46,7 +47,7 @@ struct HackerNewsAdapter: SourceAdapter {
             guard let title, let resolvedURL = URL(string: urlString) else { return nil }
 
             let published: Date? = isoFormatter.date(from: hit.created_at)
-                ?? Self.fallbackFormatter.date(from: hit.created_at)
+                ?? fallbackFormatter.date(from: hit.created_at)
 
             return RawItem(
                 title: title,
@@ -59,13 +60,6 @@ struct HackerNewsAdapter: SourceAdapter {
             )
         }
     }
-
-    /// HN sometimes returns timestamps without fractional seconds.
-    private static let fallbackFormatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f
-    }()
 
     private struct HNResponse: Decodable {
         let hits: [HNHit]

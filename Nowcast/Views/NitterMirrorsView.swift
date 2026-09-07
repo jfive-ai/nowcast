@@ -110,12 +110,12 @@ struct NitterMirrorsView: View {
         // The "/jack" handle exists historically and gives a small RSS
         // payload — good enough as a liveness probe without hammering
         // a specific user's feed.
-        guard let url = URL(string: "\(baseURL)/jack/rss") else { return .down }
+        guard let url = URL(string: "\(baseURL)/jack/rss"), OutboundURLPolicy.allows(url) else { return .down }
         var request = URLRequest(url: url)
         request.timeoutInterval = 10
         request.setValue("Nowcast/0.1", forHTTPHeaderField: "User-Agent")
         do {
-            let (_, response) = try await URLSession.shared.data(for: request)
+            let (_, response) = try await BoundedFetch.data(for: request, session: OutboundURLPolicy.guardedSession)
             if let http = response as? HTTPURLResponse, (200..<400).contains(http.statusCode) {
                 return .ok
             }

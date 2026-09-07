@@ -39,7 +39,7 @@ struct SpotlightIndexer {
     }
 
     /// Wipe everything in our domain. Used as part of a full reindex.
-    func removeAll(completion: @escaping () -> Void = {}) {
+    func removeAll(completion: @escaping @Sendable () -> Void = {}) {
         index.deleteSearchableItems(withDomainIdentifiers: [domain]) { error in
             if let error {
                 Log.spotlight.error("wipe failed: \(error.redactedDescription, privacy: .public)")

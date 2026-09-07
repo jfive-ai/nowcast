@@ -139,7 +139,7 @@ struct WebhookDeliverer {
         request.setValue("Nowcast/1.0", forHTTPHeaderField: "User-Agent")
         request.httpBody = body
         do {
-            let (_, response) = try await session.data(for: request)
+            let (_, response) = try await BoundedFetch.data(for: request, session: session, maxBytes: BoundedFetch.webhookLimit)
             let status = (response as? HTTPURLResponse)?.statusCode
             return Outcome(status: status, errorMessage: nil)
         } catch {

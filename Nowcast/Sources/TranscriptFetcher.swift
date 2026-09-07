@@ -26,7 +26,7 @@ enum TranscriptFetcher {
         request.setValue(Self.browserUA, forHTTPHeaderField: "User-Agent")
         request.timeoutInterval = 30
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await BoundedFetch.data(for: request, session: session)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw TranscriptError.fetchFailed
         }
@@ -49,7 +49,7 @@ enum TranscriptFetcher {
         request.setValue("CONSENT=YES+1", forHTTPHeaderField: "Cookie")
         request.timeoutInterval = 30
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await BoundedFetch.data(for: request, session: session)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
             throw TranscriptError.fetchFailed
         }

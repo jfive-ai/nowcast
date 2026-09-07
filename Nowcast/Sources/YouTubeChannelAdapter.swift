@@ -110,7 +110,7 @@ struct YouTubeChannelAdapter: SourceAdapter {
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
         request.setValue(apiKey, forHTTPHeaderField: "X-Goog-Api-Key")
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await BoundedFetch.data(for: request, session: session)
         guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .youtubeChannel)
         }
@@ -136,7 +136,7 @@ struct YouTubeChannelAdapter: SourceAdapter {
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
         request.setValue(apiKey, forHTTPHeaderField: "X-Goog-Api-Key")
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await BoundedFetch.data(for: request, session: session)
         guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .youtubeChannel)
         }

@@ -8,7 +8,8 @@ import NaturalLanguage
 /// Returns nil when the OS doesn't ship an English sentence embedding for
 /// the current locale build; callers should treat that as "semantic search
 /// unavailable" and fall back to keyword (FTS) search.
-final class ReportEmbedder {
+// The model is immutable after init and all vector computations hold `lock`.
+final class ReportEmbedder: @unchecked Sendable {
     /// Process-wide shared embedder. `NLEmbedding.sentenceEmbedding` loads
     /// ~tens of MB of model data the first time it's resolved, so we keep
     /// one instance alive for the app's lifetime instead of re-resolving
