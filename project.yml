@@ -58,6 +58,29 @@ targets:
         product: GRDB
       - package: FeedKit
         product: FeedKit
+  NowcastTests:
+    type: bundle.unit-test
+    platform: macOS
+    # Compile the production pure-logic files directly into a hostless bundle.
+    # Tests never launch AppState, open a user database, or read the Keychain.
+    sources:
+      - path: NowcastTests
+      - path: Nowcast/LLM/ModelPricing.swift
+      - path: Nowcast/LLM/LLMClient.swift
+      - path: Nowcast/LLM/LLMJSON.swift
+      - path: Nowcast/Pipeline/SourceReliability.swift
+      - path: Nowcast/Pipeline/BigStoryScorer.swift
+      - path: Nowcast/Pipeline/BriefDiff.swift
+      - path: Nowcast/Audio/SpeechScript.swift
+      - path: Nowcast/Storage/URLCanonicalizer.swift
+      - path: Nowcast/Models/DeliveryChannel.swift
+      - path: Nowcast/Models/BriefingResult.swift
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: com.jfive-ai.nowcast.tests
+        TEST_HOST: ""
+        CODE_SIGN_ENTITLEMENTS: ""
 schemes:
   Nowcast:
     build:
@@ -67,5 +90,13 @@ schemes:
       config: Debug
     test:
       config: Debug
+      targets: [NowcastTests]
     archive:
       config: Release
+  NowcastTests:
+    build:
+      targets:
+        NowcastTests: all
+    test:
+      config: Debug
+      targets: [NowcastTests]

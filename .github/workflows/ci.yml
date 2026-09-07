@@ -1,8 +1,7 @@
 name: CI
 
 # Builds the Debug app from project.yml (via XcodeGen) and runs the in-app
-# SelfCheck harness headlessly as the regression gate. There is no XCTest
-# target yet; the headless self-check is the automated net.
+# SelfCheck harness plus hostless XCTest logic tests as the regression gates.
 
 on:
   push:
@@ -67,3 +66,13 @@ jobs:
           export NOWCAST_SELF_CHECK_JSON=1
           export NOWCAST_SUPPORT_DIR="$RUNNER_TEMP/nowcast-selfcheck"
           "$APP"
+
+      - name: Run pure-logic unit tests
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project Nowcast.xcodeproj \
+            -scheme NowcastTests \
+            -destination 'platform=macOS' \
+            -derivedDataPath "$DERIVED" \
+            -resultBundlePath "$RUNNER_TEMP/NowcastTests.xcresult"
