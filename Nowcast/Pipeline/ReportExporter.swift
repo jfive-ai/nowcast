@@ -13,6 +13,7 @@ enum ReportExporter {
     /// Render the markdown to a paginated PDF at `url`. Uses the same
     /// `AttributedString(markdown:)` pipeline as the email renderer so the
     /// inbox preview, the in-app view, and the PDF all read the same.
+    @MainActor
     static func writePDF(markdown: String, to url: URL) throws {
         let attr = renderAttributed(markdown: markdown)
 
@@ -51,6 +52,7 @@ enum ReportExporter {
         }
     }
 
+    @MainActor
     private static func renderAttributed(markdown: String) -> NSAttributedString {
         let opts = AttributedString.MarkdownParsingOptions(interpretedSyntax: .full)
         if let parsed = try? AttributedString(markdown: markdown, options: opts) {

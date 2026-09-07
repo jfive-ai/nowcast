@@ -49,7 +49,7 @@ struct RSSAdapter: SourceAdapter {
         request.timeoutInterval = 30
         request.setValue("Nowcast/0.1", forHTTPHeaderField: "User-Agent")
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await BoundedFetch.data(for: request, session: session)
         if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
             throw SourceError.from(status: http.statusCode, response: http, kind: .rss)
         }

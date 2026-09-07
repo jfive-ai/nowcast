@@ -53,12 +53,13 @@ enum HTTPRetry {
 
     static func data(for request: URLRequest,
                      session: URLSession,
-                     maxAttempts: Int = defaultMaxAttempts) async throws -> (Data, URLResponse) {
+                     maxAttempts: Int = defaultMaxAttempts,
+                     maxBytes: Int = BoundedFetch.llmLimit) async throws -> (Data, URLResponse) {
         var attempt = 0
         while true {
             attempt += 1
             do {
-                let (data, response) = try await session.data(for: request)
+                let (data, response) = try await BoundedFetch.data(for: request, session: session, maxBytes: maxBytes)
                 if let http = response as? HTTPURLResponse,
                    isTransient(status: http.statusCode),
                    attempt < maxAttempts {

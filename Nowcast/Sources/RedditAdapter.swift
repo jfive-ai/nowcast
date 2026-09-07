@@ -105,7 +105,7 @@ struct RedditAdapter: SourceAdapter {
         request.timeoutInterval = 30
         request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await BoundedFetch.data(for: request, session: session)
         guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .reddit)
         }

@@ -4,10 +4,10 @@ import GRDB
 /// Owns the SQLite connection and the markdown-reports filesystem.
 /// Single instance, created at app launch.
 ///
-/// `@unchecked Sendable`: the only stored property is GRDB's `DatabaseQueue`,
+/// The only stored property is GRDB's Sendable `DatabaseQueue`,
 /// which is itself thread-safe (it serializes all reads/writes), so the manager
 /// is safe to call from any thread — e.g. the off-main search task (prod-29).
-final class StorageManager: @unchecked Sendable {
+final class StorageManager: Sendable {
     let dbQueue: DatabaseQueue
 
     init() throws {

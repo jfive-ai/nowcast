@@ -79,7 +79,8 @@ extension NotificationManager: UNUserNotificationCenterDelegate {
             if let reportID {
                 Self.shared.onTapReport?(reportID)
             }
-            completionHandler()
         }
+        // Acknowledge delivery on the callback queue; only the report ID crosses actors.
+        completionHandler()
     }
 }

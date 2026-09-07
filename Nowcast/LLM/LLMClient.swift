@@ -1,6 +1,6 @@
 import Foundation
 
-protocol LLMClient {
+protocol LLMClient: Sendable {
     var providerName: String { get }
     /// Default model identifier for this provider (used when no override).
     var defaultModel: String { get }

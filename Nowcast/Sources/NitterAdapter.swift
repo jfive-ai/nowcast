@@ -106,7 +106,7 @@ struct NitterAdapter: SourceAdapter {
         request.setValue("Nowcast/0.1", forHTTPHeaderField: "User-Agent")
         request.setValue("application/rss+xml, application/xml", forHTTPHeaderField: "Accept")
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await BoundedFetch.data(for: request, session: session)
         guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .xNitter)
         }

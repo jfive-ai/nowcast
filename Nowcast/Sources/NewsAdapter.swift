@@ -31,7 +31,7 @@ struct NewsAdapter: SourceAdapter {
         request.timeoutInterval = 30
         request.setValue("Nowcast/0.1", forHTTPHeaderField: "User-Agent")
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await BoundedFetch.data(for: request, session: session)
         guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .news)
         }

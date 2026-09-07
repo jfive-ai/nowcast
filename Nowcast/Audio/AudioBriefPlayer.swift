@@ -25,7 +25,9 @@ final class AudioBriefPlayer: NSObject, ObservableObject {
     /// so a late `didCancel` from an old, stopped utterance can't clobber
     /// the state of the utterance that started immediately after.
     private var currentSessionID: UInt64 = 0
-    private static var sessionKey: UInt8 = 0
+    // Only its stable address is used as an Objective-C association key; its value
+    // is never read or written. Association is set before speaking, then read only.
+    nonisolated(unsafe) private static var sessionKey: UInt8 = 0
 
     private var preferredVoiceID: String? {
         UserDefaults.standard.string(forKey: "audio.voice")
@@ -92,7 +94,7 @@ final class AudioBriefPlayer: NSObject, ObservableObject {
         state = .idle
     }
 
-    fileprivate func sessionID(for utterance: AVSpeechUtterance) -> UInt64? {
+    nonisolated fileprivate func sessionID(for utterance: AVSpeechUtterance) -> UInt64? {
         (objc_getAssociatedObject(utterance, &Self.sessionKey) as? NSNumber)?.uint64Value
     }
 }
@@ -102,10 +104,11 @@ extension AudioBriefPlayer: AVSpeechSynthesizerDelegate {
         _ synthesizer: AVSpeechSynthesizer,
         didFinish utterance: AVSpeechUtterance
     ) {
+        let sid = sessionID(for: utterance)
         Task { @MainActor in
             // Only clear state if this callback belongs to the
             // currently-active session.
-            guard let sid = sessionID(for: utterance), sid == currentSessionID else { return }
+            guard let sid, sid == currentSessionID else { return }
             // Match both `.playing` and `.paused` — `didFinish` can fire
             // on a stale utterance after pause in some macOS releases.
             switch state {
@@ -121,11 +124,12 @@ extension AudioBriefPlayer: AVSpeechSynthesizerDelegate {
         _ synthesizer: AVSpeechSynthesizer,
         didCancel utterance: AVSpeechUtterance
     ) {
+        let sid = sessionID(for: utterance)
         Task { @MainActor in
             // A stale cancel from the previously-stopped utterance must
             // NOT reset the state of the new utterance that started
             // immediately after — compare the per-utterance session id.
-            guard let sid = sessionID(for: utterance), sid == currentSessionID else { return }
+            guard let sid, sid == currentSessionID else { return }
             state = .idle
             currentReportID = nil
         }

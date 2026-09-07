@@ -40,7 +40,7 @@ struct BraveSearchAdapter: SourceAdapter {
         request.setValue("gzip", forHTTPHeaderField: "Accept-Encoding")
         request.setValue(apiKey, forHTTPHeaderField: "X-Subscription-Token")
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await BoundedFetch.data(for: request, session: session)
         guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .web)
         }

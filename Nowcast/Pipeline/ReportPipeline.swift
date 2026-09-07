@@ -3,7 +3,7 @@ import Foundation
 /// Orchestrates a single report: fetch from selected adapters, dedupe via
 /// storage's seen-index, summarize via the configured LLM, write markdown +
 /// DB row, return the new Report.
-final class ReportPipeline {
+final class ReportPipeline: Sendable {
     private let adapters: [SourceKind: SourceAdapter]
     private let storage: StorageManager
     private let llm: LLMClient

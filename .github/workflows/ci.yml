@@ -38,6 +38,9 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
+      - name: Test bounded HTTP streaming
+        run: scripts/test-bounded-fetch.sh
+
       - name: Generate Xcode project
         run: xcodegen generate
 

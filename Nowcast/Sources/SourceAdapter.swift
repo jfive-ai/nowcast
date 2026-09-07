@@ -1,6 +1,6 @@
 import Foundation
 
-protocol SourceAdapter {
+protocol SourceAdapter: Sendable {
     var kind: SourceKind { get }
     func fetch(query: String,
                window: TimeWindow,
