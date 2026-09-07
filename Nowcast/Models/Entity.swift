@@ -1,6 +1,6 @@
 import Foundation
 
-/// A named entity surfaced across one or more briefings (P5-2).
+/// A named entity surfaced across one or more briefings.
 struct Entity: Identifiable, Hashable, Codable {
     enum Kind: String, Codable, CaseIterable, Identifiable {
         case person
@@ -49,15 +49,6 @@ struct Entity: Identifiable, Hashable, Codable {
         self.lastSeenAt = lastSeenAt
         self.mentionCount = mentionCount
     }
-}
-
-/// A single (entity ↔ report ↔ cluster) link materialized by `EntityExtractor`.
-struct EntityMention: Hashable, Codable {
-    let entityID: UUID
-    let reportID: UUID
-    /// Nullable because some mentions come from the TL;DR / signal sections,
-    /// which don't belong to any single cluster.
-    let clusterID: String?
 }
 
 /// Aggregated row used by the Entities view — entity plus the report rows

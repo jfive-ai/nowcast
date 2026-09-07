@@ -1,6 +1,6 @@
 import Foundation
 
-/// Per-host reliability surface (P7-1). Derived entirely from existing
+/// Per-host reliability surface. Derived entirely from existing
 /// rows — `item.canonical_url` for the host, joined to `feedback` via
 /// the cluster/report graph — so there's no new schema.
 struct SourceReliability: Identifiable, Hashable {

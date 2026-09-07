@@ -9,12 +9,12 @@ struct BriefingResult: Codable, Equatable {
     var clusters: [Cluster]
     let signal: String
     let lowConfidence: Bool
-    /// P8-3: overall tone of the *coverage* in [-1.0, +1.0]. Negative =
+    /// Overall tone of the *coverage* in [-1.0, +1.0]. Negative =
     /// bearish/critical/alarmed; neutral = mixed/procedural; positive =
     /// bullish/optimistic. Nil for legacy responses where the model
     /// omitted the field — UI just skips that data point.
     var sentiment: Double?
-    /// P8-3: one-sentence "why this number" for tooltips on the trend chart.
+    /// One-sentence "why this number" for tooltips on the trend chart.
     var sentimentRationale: String?
 
     struct Cluster: Codable, Equatable, Identifiable {
@@ -23,10 +23,10 @@ struct BriefingResult: Codable, Equatable {
         let summary: String
         let claims: [Claim]
         let citations: [String]
-        /// P5-3: optional steel-manned counter-argument for the cluster's
+        /// Optional steel-manned counter-argument for the cluster's
         /// dominant framing. `nil` when the agent declined to invent one.
         var counterpoint: String?
-        /// P5-3: optional "what this brief doesn't cover" note — a short
+        /// Optional "what this brief doesn't cover" note — a short
         /// pointer at the missing context.
         var gap: String?
 

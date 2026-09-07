@@ -50,7 +50,7 @@ final class ReportPipeline {
     /// Generate a report. Throws if no items are found at all (caller decides
     /// whether to surface that as "nothing new this run"). Optional
     /// `progress` callback fires with `PipelineStage` events so the UI can
-    /// render a live timeline (P5-5).
+    /// render a live timeline.
     func generate(topic: String,
                   window: TimeWindow,
                   sources: [SourceKind],
@@ -61,11 +61,8 @@ final class ReportPipeline {
         emit(.started(topic: topic, sourceCount: sources.count))
         // 0. Optionally fan out the topic into 2-4 sub-queries. Single-
         //    token topics or rewriter-disabled config: just use the topic.
-        // FIX (codex review PR #45): the rewriter LLM call's token usage
-        // is now tracked and rolled into the final report's
-        // promptTokens / completionTokens / usdCost so the user's cost
-        // analytics aren't systematically understated when rewriting is
-        // enabled.
+        //    The rewriter call's token usage rolls into the report's
+        //    totals so cost analytics aren't understated.
         var auxUsage: LLMUsage = LLMUsage(promptTokens: 0, completionTokens: 0)
         var auxCost: Double = 0
         let subQueries: [String]
@@ -87,7 +84,7 @@ final class ReportPipeline {
 
         // 1. Fetch from each requested adapter × each sub-query in
         //    parallel. Each task records its own outcome (start, finish,
-        //    count, error) for the source-health panel (P4-5).
+        //    count, error) for the source-health panel.
         // Fan-out only for *query-sensitive* adapters that actually
         // change their results based on the input string. Subscription-
         // only adapters (NitterAdapter, YouTubeChannelAdapter, RSS feeds)
@@ -95,7 +92,6 @@ final class ReportPipeline {
         // wasting network and API quota. Paid/quota'd query adapters
         // (YouTube search, Brave search) also see only the original topic
         // to avoid burning daily quota in a single hourly run.
-        // FIX (codex review PRs #34, #45 + previous review #5).
         let querySensitive: Set<SourceKind> = [.hackerNews, .reddit, .news]
         let outcomes: [FetchOutcome] = await withTaskGroup(of: FetchOutcome.self) { group in
             for kind in sources {
@@ -152,17 +148,10 @@ final class ReportPipeline {
         let withinRunUnique = Self.dedupeWithinRun(collected)
         let fresh = try storage.filterUnseen(withinRunUnique, presetID: presetID)
 
-        // FIX (codex review PR #41): record per-adapter source_run rows
-        // even on the noFreshItems path. Previously this only happened
-        // after a successful insertReport, so health stats systematically
-        // omitted failed/empty runs and over-reported reliability. The
-        // rows are attached to a synthetic "no-report" run by leaving
-        // report_id pointing at a NULL (handled by allowing nullable FK
-        // in v9 below) — but to keep the change additive we use the
-        // historical-only path: write rows tied to a synthetic report-id
-        // sentinel held in a known UUID. For simplicity & migration
-        // compatibility, attach them to the prior most-recent report id
-        // instead; the panel aggregates by source_kind so attribution
+        // Record per-adapter source_run rows even on the noFreshItems
+        // path, so health stats include failed/empty runs. Rows need a
+        // report_id, so they're anchored to the most-recent prior report;
+        // the Health panel aggregates by source_kind, so exact attribution
         // doesn't matter.
         let healthAnchorID: UUID? = (try? storage.mostRecentReportID()) ?? nil
         if fresh.isEmpty {
@@ -184,7 +173,7 @@ final class ReportPipeline {
 
         // 3. Build prompt and call the LLM. If the user has dismissed
         //    clusters in the last 30 days, ask the model to deprioritize
-        //    similar headlines (P4-4 personalization hint — mild signal).
+        //    similar headlines (personalization hint — mild signal).
         let avoidHint: String? = (try? storage.recentDismissedHeadlines())
             .flatMap(PreferenceHint.build(from:))
         let prompt = BriefingPrompt.render(
@@ -206,7 +195,7 @@ final class ReportPipeline {
             CitationValidator.filter($0, againstInputs: fresh)
         }
 
-        // 3b.1 Optional counterpoint pass (P5-3). Mutates `validatedResult`
+        // 3b.1 Optional counterpoint pass. Mutates `validatedResult`
         //      in place so the new counterpoint/gap fields land in the DB
         //      and a rendered markdown section can be appended below.
         if counterpointsEnabled,
@@ -245,9 +234,8 @@ final class ReportPipeline {
             return BriefDiff.renderMarkdown(delta)
         }()
 
-        // 3d. Optional cross-source contradiction detection (P4-10).
-        // FIX (codex review PRs #35/#46): track this pass's token usage
-        // so it rolls up into the report's cost/usage totals.
+        // 3d. Optional cross-source contradiction detection. This pass's
+        //     token usage rolls into the report's cost/usage totals.
         let contradictionSection: String?
         if contradictionDetectionEnabled,
            let current = validatedResult, !current.clusters.isEmpty {
@@ -268,10 +256,10 @@ final class ReportPipeline {
         // 4. Wrap with a header and persist.
         emit(.writing)
         let header = Self.headerMarkdown(topic: topic, window: window, fresh: fresh.count, total: collected.count)
-        // FIX (review #2): if the LLM emitted ONLY the JSON block with no
-        // surrounding markdown (extractor strips both, leaving a
-        // whitespace-only prefix), fall back to the raw response so the
-        // user never gets an empty body / empty FTS row.
+        // If the LLM emitted ONLY the JSON block with no surrounding
+        // markdown (extractor strips both, leaving a whitespace-only
+        // prefix), fall back to the raw response so the user never gets
+        // an empty body / empty FTS row.
         let trimmedMarkdown = extracted.markdown.trimmingCharacters(in: .whitespacesAndNewlines)
         let visibleBody = (extracted.result == nil || trimmedMarkdown.isEmpty)
             ? response.text
@@ -348,11 +336,10 @@ final class ReportPipeline {
         )
         let stored = try storage.insertReport(draft, markdown: markdown)
 
-        // 5. Record items as seen. FIX (review #1): use `try?` — a failed
-        // seen-index write must NOT prevent items/clusters/FTS/source_run
-        // from being persisted, or the report becomes orphaned. The cost
-        // of a missed seen-index entry is one repeated story on the next
-        // run, which is far cheaper than an orphaned report.
+        // 5. Record items as seen. `try?` — a failed seen-index write must
+        //    NOT prevent items/clusters/FTS/source_run from being
+        //    persisted, or the report becomes orphaned. A missed entry
+        //    just costs one repeated story on the next run.
         try? storage.recordSeen(fresh, presetID: presetID)
 
         // 6. Link items to this report so future runs / views can find them.
@@ -366,7 +353,7 @@ final class ReportPipeline {
         if let validated = validatedResult {
             try? storage.saveBriefing(validated, reportID: stored.id)
 
-            // 7a. Cross-brief entity extraction (P5-2). Always best-effort:
+            // 7a. Cross-brief entity extraction. Always best-effort:
             //     ignore failures, ignore empty results, never block the
             //     report. Toggle in Settings keeps this opt-in for cost.
             if entityExtractionEnabled {
@@ -386,12 +373,12 @@ final class ReportPipeline {
             }
         }
 
-        // 7b. Index the report + items into FTS5 for in-app search (P4-6).
+        // 7b. Index the report + items into FTS5 for in-app search.
         try? storage.indexReportForSearch(stored.id, topic: topic, body: markdown)
         let storedItems = (try? storage.itemsForReport(stored.id)) ?? []
         try? storage.indexItemsForSearch(storedItems)
 
-        // 7c. Embed for semantic search (P8-1). Best effort — semantic
+        // 7c. Embed for semantic search. Best effort — semantic
         //     search is a secondary surface; if the OS embedder is absent
         //     or vector computation fails, we silently skip and rely on
         //     keyword/FTS. Runs on the calling task, costing a handful of
@@ -407,13 +394,9 @@ final class ReportPipeline {
         }
 
         // 8. Record per-adapter outcomes for the source health panel.
-        // FIX (codex review PR #30): per-source freshCount now uses the
-        // adapter's *own* contribution to the dedup'd set, not the
-        // global fresh hash set. Previously, if two adapters returned the
-        // same URL, both got credit for the single fresh item — inflating
-        // per-source contribution and obscuring which adapter actually
-        // pulls weight. We attribute each fresh URL to the FIRST adapter
-        // that returned it (deterministic ordering: by `outcomes` order).
+        //    Each fresh URL is credited to the FIRST adapter that returned
+        //    it (deterministic: `outcomes` order), so two adapters
+        //    returning the same URL don't both get credit for one item.
         let freshURLHashSet = Set(fresh.map(\.urlHash))
         recordSourceRuns(outcomes: outcomes,
                          freshURLHashes: freshURLHashSet,

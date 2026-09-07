@@ -283,7 +283,7 @@ final class StorageManager: @unchecked Sendable {
     }()
 
     /// Most-recent report ID, if any. Used as a synthetic anchor for
-    /// source-health rows on noFreshItems runs (FIX: codex review PR #41).
+    /// source-health rows on noFreshItems runs.
     func mostRecentReportID() throws -> UUID? {
         try dbQueue.read { db in
             guard let s: String = try String.fetchOne(db,
@@ -319,9 +319,9 @@ final class StorageManager: @unchecked Sendable {
         // harmless (and reclaimable); a row pointing at a missing file is not.
         try dbQueue.write { db in
             let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
-            // FIX (codex review PR #42): purge FTS shadow rows when their
-            // parent report is deleted, otherwise search returns stale
-            // hits whose detail view would be empty.
+            // Purge FTS shadow rows when their parent report is deleted,
+            // otherwise search returns stale hits whose detail view would
+            // be empty.
             try db.execute(
                 sql: "DELETE FROM report_fts WHERE report_id IN (\(placeholders))",
                 arguments: StatementArguments(ids)
@@ -683,11 +683,10 @@ final class StorageManager: @unchecked Sendable {
                 arguments: [reportID.uuidString]
             )
             for (idx, cluster) in result.clusters.enumerated() {
-                // FIX (codex review PR #67 P2): persist the cluster.id
-                // that the briefing emitted (the same `c1`/`c2`/... that
-                // downstream extractors reference), so entity_mention.
-                // cluster_id can be joined back to cluster.id. We scope
-                // by report so collisions across reports stay safe.
+                // Persist the cluster id the briefing emitted (the same
+                // `c1`/`c2`/… downstream extractors reference) so
+                // entity_mention.cluster_id joins back to cluster.id —
+                // scoped by report so ids can't collide across reports.
                 let persistedID = "\(reportID.uuidString):\(cluster.id)"
                 let citationsJSON = (try? Self.encodeJSON(cluster.citations)) ?? "[]"
                 try db.execute(sql: """
@@ -720,16 +719,7 @@ final class StorageManager: @unchecked Sendable {
         }
     }
 
-    func totalClusterCount() throws -> Int {
-        try dbQueue.read { db in
-            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM cluster") ?? 0
-        }
-    }
-
     /// Load the clusters (+ claims) for a given report, ordered by `ord`.
-    /// FIX (P5-3 rebase): rewritten to use a single per-cluster claim
-    /// fetch and to pass through the new `counterpoint` / `gap` columns
-    /// added by schema v11.
     func clusters(for reportID: UUID) throws -> [BriefingResult.Cluster] {
         try dbQueue.read { db in
             let rows = try Row.fetchAll(db, sql: """
@@ -842,14 +832,10 @@ final class StorageManager: @unchecked Sendable {
         let cleaned = Self.sanitizeFTSQuery(query)
         guard !cleaned.isEmpty else { return [] }
         return try dbQueue.read { db in
-            // FIX (codex review PRs #31/#42): search both `report_fts` AND
-            // `item_fts`. Previously, terms that only appeared in item
-            // titles/snippets were never returned, defeating the search
-            // surface's documented coverage.
-            //
-            // FIX (codex review PR #42): JOIN against `report` so deleted
-            // reports (whose FTS shadow rows weren't purged) don't appear
-            // as ghost hits.
+            // Search both `report_fts` AND `item_fts` so terms that only
+            // appear in item titles/snippets still match. JOIN against
+            // `report` so deleted reports whose FTS shadow rows weren't
+            // purged don't appear as ghost hits.
             let reportRows = try Row.fetchAll(db, sql: """
                 SELECT f.report_id AS report_id,
                        r.topic AS topic,
@@ -914,7 +900,7 @@ final class StorageManager: @unchecked Sendable {
         return tokens.map { "\"\($0)\"" }.joined(separator: " AND ")
     }
 
-    // MARK: - Embeddings (v14, P8-1)
+    // MARK: - Embeddings (v14)
 
     /// Persist a per-report sentence embedding as a Float32 LE BLOB.
     /// Idempotent — overwrites any prior vector for the same report.
@@ -971,7 +957,7 @@ final class StorageManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - Big story (v15, P8-2)
+    // MARK: - Big story (v15)
 
     /// Overwrite the (score, headline) pair on a report. Used by the
     /// pipeline at save time and by the launch-time backfill for legacy
@@ -1046,10 +1032,10 @@ final class StorageManager: @unchecked Sendable {
     func sourceHealth(days: Int = 30) throws -> [SourceHealth] {
         let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
         return try dbQueue.read { db in
-            // FIX (review #4): correlated subquery folded into the main
-            // SELECT instead of a per-row follow-up query — eliminates the
-            // N+1 in the prior implementation. SQLite resolves the
-            // subquery once per aggregate row.
+            // last_error is a correlated subquery folded into the main
+            // SELECT (no per-row follow-up queries) and scoped to the same
+            // time window as the rest of the aggregate so the 30-day view
+            // doesn't surface an older error.
             let rows = try Row.fetchAll(db, sql: """
                 SELECT source_kind,
                        COUNT(*) AS runs,
@@ -1060,10 +1046,6 @@ final class StorageManager: @unchecked Sendable {
                                 THEN (julianday(finished_at) - julianday(started_at)) * 86400.0
                                 ELSE NULL END) AS avg_latency,
                        MAX(started_at) AS last_run_at,
-                       -- FIX (codex review PRs #30/#41): scope last_error to
-                       -- the same time window as the rest of the aggregate
-                       -- so the 30-day view doesn't surface an old error
-                       -- from outside the selected window.
                        (SELECT error_message FROM source_run sr2
                           WHERE sr2.source_kind = sr.source_kind
                             AND sr2.error_message IS NOT NULL
@@ -1152,12 +1134,9 @@ final class StorageManager: @unchecked Sendable {
 
     /// Headlines of clusters the user dismissed within the last `days` days,
     /// in newest-first order. Feeds the "avoid these themes" prompt hint.
-    ///
-    /// FIX (codex review PR #29): collapse by `target_id` so the same
-    /// cluster headline doesn't crowd out other themes when the user
-    /// applied multiple feedback kinds (e.g. dismiss + thumbs_down) or
-    /// re-added feedback. We pick the most recent feedback timestamp per
-    /// cluster and order by that.
+    /// Collapsed by `target_id` (most-recent feedback timestamp per
+    /// cluster) so a cluster with multiple feedback kinds doesn't crowd
+    /// out other themes.
     func recentDismissedHeadlines(days: Int = 30, limit: Int = 10) throws -> [String] {
         let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
         return try dbQueue.read { db in
@@ -1178,7 +1157,7 @@ final class StorageManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - Conversation (v9, P5-1)
+    // MARK: - Conversation (v9)
 
     func insertConversationMessage(_ message: ConversationMessage) throws {
         let citationsJSON = (try? Self.encodeJSON(message.citations)) ?? "[]"
@@ -1219,26 +1198,13 @@ final class StorageManager: @unchecked Sendable {
         }
     }
 
-    func conversationMessageCount(forReport reportID: UUID) throws -> Int {
-        try dbQueue.read { db in
-            try Int.fetchOne(db, sql: """
-                SELECT COUNT(*) FROM conversation_message WHERE report_id = ?
-                """, arguments: [reportID.uuidString]) ?? 0
-        }
-    }
-
-    // MARK: - Entities (v10, P5-2)
+    // MARK: - Entities (v10)
 
     /// Upserts an entity by (canonical_name, kind). Returns the row's id —
-    /// either the freshly-inserted one or the existing one.
-    /// FIX (codex review PRs #56/#67 P1): the `mention_count` counter is
-    /// kept in sync with the actual `entity_mention` table via a single
-    /// transactional path. Callers no longer call upsertEntity +
-    /// recordEntityMention separately for counting — they call
-    /// `recordEntity(name:kind:reportID:clusterID:)` below, which inserts
-    /// the mention with `INSERT OR IGNORE` and only bumps `mention_count`
-    /// when the insert actually affects a row. Prevents counter drift on
-    /// re-runs / backfills.
+    /// either the freshly-inserted one or the existing one. Never touches
+    /// `mention_count`; that is bumped exclusively by
+    /// `recordEntityMention`, which counts only genuinely-new mention
+    /// rows, so the counter can't drift on re-runs / backfills.
     @discardableResult
     func upsertEntity(name: String, kind: Entity.Kind, at date: Date = Date()) throws -> UUID {
         try dbQueue.write { db in
@@ -1247,9 +1213,9 @@ final class StorageManager: @unchecked Sendable {
                 WHERE canonical_name = ? AND kind = ?
                 LIMIT 1
                 """, arguments: [name, kind.rawValue]) {
-                // Only update last_seen_at here. The mention_count is
-                // updated below from recordEntity / recordEntityMention
-                // when a new mention row is *actually inserted*.
+                // Only update last_seen_at here; mention_count is bumped
+                // by recordEntityMention when a mention row is actually
+                // inserted.
                 try db.execute(sql: """
                     UPDATE entity
                     SET last_seen_at = ?
@@ -1385,7 +1351,7 @@ final class StorageManager: @unchecked Sendable {
         }
     }
 
-    // MARK: - Source reliability (P7-1)
+    // MARK: - Source reliability
 
     /// Per-host reliability rows. Joins items → report_item → cluster →
     /// feedback to count thumbs-up / thumbs-down / hallucinations against
@@ -1399,15 +1365,11 @@ final class StorageManager: @unchecked Sendable {
         }
         var byHost: [String: Row] = [:]
 
-        // FIX (codex review PR #76 P1): the previous SQL did a cartesian
-        // join (`LEFT JOIN cluster ON c.report_id = ri.report_id`) which
-        // paired every item with every cluster in the report, regardless
-        // of whether the item was actually cited by that cluster. That
-        // inflated `mentions` by cluster count and attributed cluster
-        // feedback to every host in the report. We now resolve the
-        // item→cluster edge by checking whether the item's canonical URL
-        // appears in the cluster's citations_json array — done in Swift
-        // for robustness across SQLite JSON1 availability.
+        // The item→cluster edge is resolved by checking whether the item's
+        // canonical URL appears in the cluster's citations_json array —
+        // done in Swift rather than SQL both for JSON1 portability and so
+        // feedback is credited only to hosts the cluster actually cited
+        // (a report-level join would credit every host in the report).
         try dbQueue.read { db in
             // 1. Materialize per-report items.
             let itemRows = try GRDB.Row.fetchAll(db, sql: """
@@ -1508,11 +1470,8 @@ final class StorageManager: @unchecked Sendable {
     /// Returns only items whose URL hashes haven't been recorded for this preset.
     /// Hashes are NOT recorded here — the caller should call
     /// `recordSeen(_:presetID:)` after a successful LLM/persist round-trip,
-    /// so a network failure doesn't permanently blacklist items.
-    ///
-    /// FIX (review #7): batch the lookup with a single `IN (...)` query.
-    /// Previously this was N round-trips per call (one per item); with the
-    /// seen_item index growing across the user's history that compounded.
+    /// so a network failure doesn't permanently blacklist items. The lookup
+    /// is batched into a single `IN (...)` query.
     func filterUnseen(_ items: [RawItem], presetID: UUID?) throws -> [RawItem] {
         guard !items.isEmpty else { return [] }
         let presetKey = presetID?.uuidString

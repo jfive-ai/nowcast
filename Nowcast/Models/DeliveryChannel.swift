@@ -1,7 +1,7 @@
 import Foundation
 
 /// How a finished report is surfaced to the user. Backwards-compatible with
-/// the pre-P5-4 String-only encoding: existing presets serialized as
+/// the legacy String-only encoding: existing presets serialized as
 /// `"inApp"` / `"email"` / etc still decode correctly.
 enum DeliveryChannel: Codable, Hashable, Identifiable {
     case inApp
@@ -87,7 +87,7 @@ enum DeliveryChannel: Codable, Hashable, Identifiable {
             try c.encode(cfg.format.rawValue, forKey: .format)
         default:
             // Preserve the old single-string encoding for the plain cases so
-            // pre-P5-4 readers (if any) keep working.
+            // legacy readers (if any) keep working.
             var c = encoder.singleValueContainer()
             try c.encode(id)
         }

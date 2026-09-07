@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Right-side drawer attached to a `ReportView` that lets the user ask
-/// follow-up questions about the brief (P5-1). Holds a `BriefChatSession`
+/// follow-up questions about the brief. Holds a `BriefChatSession`
 /// for the report's lifetime in the view tree.
 struct ChatDrawerView: View {
     @ObservedObject var session: BriefChatSession

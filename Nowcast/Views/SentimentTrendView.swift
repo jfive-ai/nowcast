@@ -1,7 +1,7 @@
 import SwiftUI
 import Charts
 
-/// Per-preset sentiment trend over time (P8-3). Plots the LLM-reported
+/// Per-preset sentiment trend over time. Plots the LLM-reported
 /// coverage sentiment of each brief on a [-1, +1] axis with a neutral=0
 /// baseline. Green above 0 = bullish/optimistic coverage; red below = bearish.
 ///

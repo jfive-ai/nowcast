@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Popover body shown when the user hovers a citation chip in
-/// `MarkdownLinkText` (P6-1). Surfaces the matched `PersistedItem` if one
+/// `MarkdownLinkText`. Surfaces the matched `PersistedItem` if one
 /// exists in the brief's source set; otherwise a minimal preview of just
 /// the URL host.
 struct CitationPopover: View {

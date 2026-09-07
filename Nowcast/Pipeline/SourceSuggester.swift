@@ -45,17 +45,12 @@ struct SourceSuggester {
     }
 
     static func parse(_ raw: String) -> [SourceSubscription] {
-        let cleaned = stripCodeFence(raw).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let data = cleaned.data(using: .utf8) else { return [] }
-
         struct Suggestion: Decodable {
             let kind: String
             let identifier: String
             let label: String
         }
-        guard let suggestions = try? JSONDecoder().decode([Suggestion].self, from: data) else {
-            return []
-        }
+        guard let suggestions = LLMJSON.decode([Suggestion].self, from: raw) else { return [] }
 
         return suggestions.compactMap { s -> SourceSubscription? in
             guard let kind = mapKind(s.kind),
@@ -76,10 +71,5 @@ struct SourceSuggester {
             return .youtubeChannel
         default: return nil
         }
-    }
-
-    /// LLMs sometimes add ```json ... ``` despite being told not to.
-    private static func stripCodeFence(_ raw: String) -> String {
-        LLMJSON.stripFence(raw)
     }
 }

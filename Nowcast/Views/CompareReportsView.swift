@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Side-by-side comparison of two reports on the same topic / preset (P6-3).
+/// Side-by-side comparison of two reports on the same topic / preset.
 /// Each column renders its brief through the same sectionized layout as the
 /// main report view (V3), so equivalent sections look identical and are easy to
 /// compare; the cluster-level delta (added / continuing / dropped) is shown as

@@ -1,9 +1,9 @@
 import SwiftUI
 
 /// In-app search across persisted reports. Two modes:
-///   - Keyword (FTS5, P4-6) — exact-token + porter-stemmed matches with
+///   - Keyword (FTS5) — exact-token + porter-stemmed matches with
 ///     in-snippet highlighting.
-///   - Semantic (NLEmbedding, P8-1) — cosine similarity over per-report
+///   - Semantic (NLEmbedding) — cosine similarity over per-report
 ///     sentence embeddings. Finds briefs by *meaning* even when the user
 ///     can't recall the exact phrasing.
 /// `@MainActor`-isolated so the debounced search `Task` (in `schedule()`)

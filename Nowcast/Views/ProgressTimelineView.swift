@@ -2,7 +2,7 @@ import SwiftUI
 import AppKit
 
 /// Live stage-by-stage timeline overlaid while a report is being generated
-/// (P5-5). Bound to `AppState.generation`.
+///. Bound to `AppState.generation`.
 struct ProgressTimelineView: View {
     let state: GenerationState
     /// Stop the in-flight generation. When nil, no Stop button is shown.

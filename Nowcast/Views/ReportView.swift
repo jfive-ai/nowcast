@@ -104,7 +104,7 @@ struct ReportView: View {
             }
             clusterFeedbackKinds = byCluster
             chatHolder.bind(report: report, state: state)
-            // P6-1: build a URL → PersistedItem map for citation hover popovers.
+            // Build a URL → PersistedItem map for citation hover popovers.
             let items = state.itemsForReport(report.id)
             urlIndex = MarkdownLinkText.buildIndex(items: items)
             // Core content (markdown, clusters, citations) is ready — swap the
@@ -112,22 +112,18 @@ struct ReportView: View {
             // `await` below; the loads above are synchronous, so there's no
             // cancellation window that could leave the skeleton stuck.
             loaded = true
-            // P6-2: build the provenance rows for the drawer.
+            // Build the provenance rows for the drawer.
             provenanceRows = ProvenanceBuilder.build(clusters: clusters, items: items)
-            // P6-4: kick off follow-up suggestions in the background; the
+            // Kick off follow-up suggestions in the background; the
             // strip is hidden until results land.
             followUps = []
             let tldr = Self.extractTLDR(from: markdown)
             let headlines = clusters.map(\.headline)
             let targetReportID = report.id
-            // FIX (codex review PR #70 P1): the previous stale-result
-            // check compared `reportRef.id == report.id` where both
-            // came from the same `.task(id:)` capture and were therefore
-            // always equal. After navigating from report A to report B,
-            // A's slow LLM response could land later and overwrite B's
-            // followUps. We now compare the captured `targetReportID`
-            // against the *live* selection in state — only assign when
-            // they still match.
+            // Compare the captured `targetReportID` against the *live*
+            // selection before assigning: after navigating from report A
+            // to report B, A's slow LLM response can land later and would
+            // otherwise overwrite B's followUps.
             Task { @MainActor in
                 let sugs = await state.suggestFollowUps(
                     for: report,
@@ -155,11 +151,11 @@ struct ReportView: View {
                 }
             }
         }
-        // FIX (codex review PR #55 P2): if session is nil because the
-        // user had no LLM key at first task fire, re-attempt the bind
-        // whenever the user opens the chat drawer OR when key/provider
-        // state changes downstream. Cheap: bind() short-circuits when
-        // a valid session already exists for this report.
+        // If session is nil because the user had no LLM key at first task
+        // fire, re-attempt the bind whenever the user opens the chat
+        // drawer OR when key/provider state changes downstream. Cheap:
+        // bind() short-circuits when a valid session already exists for
+        // this report.
         .onChange(of: chatOpen) { newValue in
             if newValue { chatHolder.bind(report: report, state: state) }
         }
@@ -233,8 +229,8 @@ struct ReportView: View {
     }
 
     /// Pulls TL;DR bullet lines out of brief markdown — same shape that
-    /// `WebhookDeliverer` extracts. Used by P6-4 to feed the follow-up
-    /// suggester a compact summary of the current brief.
+    /// `WebhookDeliverer` extracts. Feeds the follow-up suggester a
+    /// compact summary of the current brief.
     static func extractTLDR(from markdown: String) -> [String] {
         var out: [String] = []
         var inTLDR = false
@@ -258,11 +254,11 @@ struct ReportView: View {
     final class ChatSessionHolder: ObservableObject {
         @Published var session: BriefChatSession?
         func bind(report: Report, state: AppState) {
-            // FIX (codex review PR #55 P2): only short-circuit when we
-            // ALREADY have a valid session for this report. If session
-            // is nil (e.g. user fixed their API key after first load),
-            // retry the makeBriefChatSession call so the chat drawer
-            // becomes usable without forcing the user to navigate away.
+            // Only short-circuit when we ALREADY have a valid session for
+            // this report. If session is nil (e.g. user fixed their API
+            // key after first load), retry the makeBriefChatSession call
+            // so the chat drawer becomes usable without forcing the user
+            // to navigate away.
             if let existing = session, existing.report.id == report.id {
                 return
             }

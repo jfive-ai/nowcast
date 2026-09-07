@@ -1,7 +1,7 @@
 import Foundation
 
 /// Pure mapper from the structured clusters + persisted items of a report
-/// into a flat list of (cluster, claim, supporting items) rows (P6-2).
+/// into a flat list of (cluster, claim, supporting items) rows.
 /// Used by `ProvenanceView` to render the "show your work" panel.
 enum ProvenanceBuilder {
     struct ClusterRows: Identifiable {

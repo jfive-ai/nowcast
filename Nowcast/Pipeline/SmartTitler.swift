@@ -1,6 +1,6 @@
 import Foundation
 
-/// One-line headline generator that runs after a brief is produced (P7-2).
+/// One-line headline generator that runs after a brief is produced.
 /// Returns nil on any failure — caller falls back to `report.topic`.
 final class SmartTitler {
     private let llm: LLMClient

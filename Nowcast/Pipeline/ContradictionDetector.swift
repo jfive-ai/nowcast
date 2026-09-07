@@ -35,7 +35,6 @@ struct ContradictionDetector {
 
     /// Result envelope with usage tokens so the pipeline can include the
     /// contradiction-pass spend in the report's cost accounting.
-    /// FIX (codex review PRs #35, #46).
     struct TrackedDetection {
         let pairs: [Contradiction]
         let usage: LLMUsage?
@@ -106,10 +105,7 @@ struct ContradictionDetector {
     }
 
     private static func parse(_ raw: String) -> [Contradiction] {
-        let trimmed = LLMJSON.stripFence(raw).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let data = trimmed.data(using: .utf8),
-              let env = try? JSONDecoder().decode(Envelope.self, from: data)
-        else { return [] }
+        guard let env = LLMJSON.decode(Envelope.self, from: raw) else { return [] }
         return env.pairs.map {
             Contradiction(
                 claimA: $0.claim_a,

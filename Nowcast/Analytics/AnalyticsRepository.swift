@@ -37,12 +37,11 @@ struct AnalyticsRepository {
     func costByDay(lastDays days: Int = 30) throws -> [CostPoint] {
         try storage.dbQueue.read { db in
             let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
-            // FIX (codex review PR #33): bucket by *local* day, not UTC.
-            // SQLite's `date(generated_at)` returns UTC; for non-UTC time
-            // zones (most users) reports at e.g. 7pm local would land in
-            // the wrong calendar bucket. We pass the current TZ's offset
-            // via the `localmod` modifier so daily spend lines up with
-            // the user's calendar.
+            // Bucket by *local* day, not UTC. SQLite's `date(generated_at)`
+            // returns UTC; for non-UTC time zones (most users) reports at
+            // e.g. 7pm local would land in the wrong calendar bucket. We
+            // pass the current TZ's offset via the `localmod` modifier so
+            // daily spend lines up with the user's calendar.
             let tzMinutes = TimeZone.current.secondsFromGMT() / 60
             let sign = tzMinutes >= 0 ? "+" : "-"
             let absMins = abs(tzMinutes)

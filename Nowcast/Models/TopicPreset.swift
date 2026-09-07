@@ -10,10 +10,10 @@ struct TopicPreset: Identifiable, Codable, Hashable {
     var deliveryChannels: [DeliveryChannel]
     var createdAt: Date
     var lastRunAt: Date?
-    /// P5-6: when true, a weekly synthesis runs once per week over the
+    /// When true, a weekly synthesis runs once per week over the
     /// preset's daily reports.
     var weeklyDigestEnabled: Bool
-    /// P5-6: when the synthesizer last ran for this preset. Drives
+    /// When the synthesizer last ran for this preset. Drives
     /// scheduler eligibility (now ≥ last_weekly_at + 7 days).
     var lastWeeklyAt: Date?
 

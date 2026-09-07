@@ -4,7 +4,7 @@ import Foundation
 /// clusters on the same topic/preset and emits a `BriefDelta` describing
 /// what's new, what's continuing, and what's dropped.
 ///
-/// Similarity is intentionally embedding-free (P4-1 deferred embeddings):
+/// Similarity is intentionally embedding-free:
 /// case-folded Jaccard over alphanumeric word tokens of the headline +
 /// summary. Threshold 0.30 — chosen so headline reflows ("ETH ETF flows
 /// surge" vs "Surging ETH ETF flows") still match while genuinely new

@@ -2,7 +2,7 @@ import Foundation
 
 /// Once a week per opt-in preset, synthesizes the last 7 days of daily
 /// briefs into a meta-brief: longest-running storylines, what changed,
-/// and what's worth watching next week (P5-6).
+/// and what's worth watching next week.
 ///
 /// The result is written through `StorageManager.insertReport` with
 /// `kind = .weeklyDigest`, so it shows up in History / FTS / exports /

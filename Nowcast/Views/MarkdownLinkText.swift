@@ -1,7 +1,7 @@
 import Foundation
 
 /// Utility namespace for splitting a markdown line into prose + link
-/// segments (P6-1). Consumed by `BriefInlineText` / `CitationChipRow` to render
+/// segments. Consumed by `BriefInlineText` / `CitationChipRow` to render
 /// citation chips with hover popovers under each line.
 enum MarkdownLinkText {
     enum Segment {
@@ -52,15 +52,11 @@ enum MarkdownLinkText {
     }
 
     /// Normalize so chip lookup matches what `URLCanonicalizer.hash` saw
-    /// when the item was persisted. We use the same canonicalization
-    /// pipeline so chips for `www.` / utm_*-bearing / fragment-bearing
-    /// citation variants still resolve.
-    ///
-    /// FIX (codex review PRs #67/#68 P2): the previous "drop trailing
-    /// slash + lowercase" was much weaker than `URLCanonicalizer`'s
-    /// host-prefix / tracker-param / fragment stripping. Any citation
-    /// that passed validation upstream could miss this lookup and the
-    /// hover popover would falsely report "not in source set".
+    /// when the item was persisted. Anything weaker than the same
+    /// canonicalization pipeline (host-prefix / tracker-param / fragment
+    /// stripping) lets a citation that passed validation upstream miss
+    /// this lookup, making the hover popover falsely report "not in
+    /// source set".
     static func normalize(_ urlString: String) -> String {
         guard let url = URL(string: urlString) else { return urlString.lowercased() }
         return URLCanonicalizer.canonicalize(url).absoluteString

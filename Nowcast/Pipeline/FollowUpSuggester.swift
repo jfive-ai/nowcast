@@ -1,6 +1,6 @@
 import Foundation
 
-/// LLM-driven "what should I subscribe to next?" suggester (P6-4). Takes
+/// LLM-driven "what should I subscribe to next?" suggester. Takes
 /// the report's TL;DR + cluster headlines plus the user's existing preset
 /// names (to avoid duplicates) and returns up to 3 candidate presets the
 /// user can one-click create.
@@ -68,8 +68,6 @@ final class FollowUpSuggester {
     }
 
     static func parse(_ raw: String) -> [Suggestion] {
-        guard let json = LLMJSON.firstJSONSlice(in: raw),
-              let data = json.data(using: .utf8) else { return [] }
         struct Envelope: Decodable {
             struct Hit: Decodable {
                 let name: String
@@ -78,11 +76,10 @@ final class FollowUpSuggester {
             }
             let suggestions: [Hit]
         }
-        let decoded = (try? JSONDecoder().decode(Envelope.self, from: data)) ?? Envelope(suggestions: [])
-        // FIX (codex review PR #70 P2): tolerate the LLM emitting either
-        // `braveSearch`/`nitter` (the prompt's old labels) or the actual
-        // SourceKind raw values (`web`/`xNitter`). Map common aliases so
-        // suggestions don't silently fall back to .hackerNews.
+        guard let decoded = LLMJSON.decode(Envelope.self, from: raw) else { return [] }
+        // Tolerate the LLM emitting common aliases (`brave`, `nitter`,
+        // `x`…) instead of SourceKind raw values, so suggestions don't
+        // silently fall back to .hackerNews.
         let aliases: [String: SourceKind] = [
             "bravesearch": .web,
             "brave": .web,

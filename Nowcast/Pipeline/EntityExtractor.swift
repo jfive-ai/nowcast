@@ -1,7 +1,7 @@
 import Foundation
 
 /// Pulls a flat list of named entities out of a `BriefingResult` and
-/// persists them via `StorageManager` (P5-2). Best-effort: any failure
+/// persists them via `StorageManager`. Best-effort: any failure
 /// degrades to a rule-based fallback rather than aborting the report.
 final class EntityExtractor {
     struct Extracted: Codable, Equatable {
@@ -107,15 +107,11 @@ final class EntityExtractor {
         """
 
         let response = try await llm.summarize(prompt: prompt, model: model)
-        let hits = try Self.parseEnvelope(response.text, clusters: briefing.clusters)
+        let hits = Self.parseEnvelope(response.text, clusters: briefing.clusters)
         return (hits, response.usage, response.model)
     }
 
-    static func parseEnvelope(_ raw: String, clusters: [BriefingResult.Cluster]) throws -> [Extracted] {
-        // Pick the first valid JSON object in the response.
-        guard let json = LLMJSON.firstJSONSlice(in: raw),
-              let data = json.data(using: .utf8) else { return [] }
-
+    static func parseEnvelope(_ raw: String, clusters: [BriefingResult.Cluster]) -> [Extracted] {
         struct Envelope: Decodable {
             struct Hit: Decodable {
                 let name: String
@@ -125,7 +121,7 @@ final class EntityExtractor {
             let entities: [Hit]
         }
 
-        let decoded = try JSONDecoder().decode(Envelope.self, from: data)
+        guard let decoded = LLMJSON.decode(Envelope.self, from: raw) else { return [] }
         let clusterIDByLabel: [String: String] = Dictionary(
             uniqueKeysWithValues: clusters.enumerated().map { (idx, c) in ("c\(idx + 1)", c.id) }
         )

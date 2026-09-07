@@ -1,7 +1,7 @@
 import Foundation
 import NaturalLanguage
 
-/// Local, on-device sentence embedder (P8-1). Wraps Apple's
+/// Local, on-device sentence embedder. Wraps Apple's
 /// `NLEmbedding.sentenceEmbedding(for: .english)` — runs entirely on the
 /// user's machine with zero network calls and no API key.
 ///
@@ -16,6 +16,11 @@ final class ReportEmbedder {
     static let shared = ReportEmbedder()
 
     private let embedding: NLEmbedding?
+    /// `NLEmbedding` is not thread-safe: concurrent `vector(for:)` calls
+    /// (e.g. the detached launch-time backfill racing the pipeline's
+    /// save-time embed) crash inside CoreNLP/BNNS. All access is
+    /// serialized through this lock.
+    private let lock = NSLock()
 
     init() {
         self.embedding = NLEmbedding.sentenceEmbedding(for: .english)
@@ -33,6 +38,8 @@ final class ReportEmbedder {
         guard let embedding else { return nil }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
+        lock.lock()
+        defer { lock.unlock() }
         guard let vector = embedding.vector(for: trimmed) else { return nil }
         return vector.map { Float($0) }
     }

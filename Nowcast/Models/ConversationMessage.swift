@@ -1,6 +1,6 @@
 import Foundation
 
-/// One turn in the chat thread attached to a report (P5-1). Roles match
+/// One turn in the chat thread attached to a report. Roles match
 /// the simple two-actor model the LLM clients already expect.
 struct ConversationMessage: Identifiable, Hashable, Codable {
     enum Role: String, Codable {

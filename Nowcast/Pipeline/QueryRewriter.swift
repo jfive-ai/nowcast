@@ -28,7 +28,6 @@ struct QueryRewriter {
 
     /// Result envelope with usage tokens so the pipeline can roll the
     /// rewriter's cost into the final report's accounting.
-    /// FIX (codex review PR #45).
     struct TrackedRewrite {
         let queries: [String]
         let usage: LLMUsage?
@@ -52,8 +51,8 @@ struct QueryRewriter {
 
         do {
             let response = try await llm.summarize(prompt: prompt, model: model)
-            if let parsed = Self.extractJSON(response.text) {
-                let unique = uniqueNonEmpty(parsed)
+            if let env = LLMJSON.decode(Envelope.self, from: response.text) {
+                let unique = uniqueNonEmpty(env.subQueries)
                 let queries = unique.isEmpty ? [topic] : Array(unique.prefix(Self.maxSubQueries))
                 return TrackedRewrite(queries: queries, usage: response.usage, model: response.model)
             }
@@ -64,17 +63,6 @@ struct QueryRewriter {
     }
 
     private struct Envelope: Decodable { let subQueries: [String] }
-
-    /// Pulls the JSON object out of free-form text (model may have wrapped
-    /// it in markdown despite instructions).
-    private static func extractJSON(_ raw: String) -> [String]? {
-        let trimmed = LLMJSON.stripFence(raw).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        guard let data = trimmed.data(using: .utf8),
-              let env = try? JSONDecoder().decode(Envelope.self, from: data)
-        else { return nil }
-        return env.subQueries
-    }
 
     private func uniqueNonEmpty(_ subs: [String]) -> [String] {
         var seen = Set<String>()

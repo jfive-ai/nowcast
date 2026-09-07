@@ -18,13 +18,12 @@ final class AudioBriefPlayer: NSObject, ObservableObject {
 
     private let synthesizer = AVSpeechSynthesizer()
     private var currentReportID: UUID?
-    /// FIX (codex review PRs #32/#43): monotonically-increasing playback
-    /// session id. Every new `play()` bumps this. Delegate callbacks
-    /// carry the session id they were started under (associated via
-    /// `objc_setAssociatedObject` on the utterance), and only mutate
-    /// state if it matches `currentSessionID`. This prevents a late
-    /// `didCancel` from an old, stopped utterance from clobbering the
-    /// state of the new utterance that started immediately after.
+    /// Monotonically-increasing playback session id. Every new `play()`
+    /// bumps this. Delegate callbacks carry the session id they were
+    /// started under (associated via `objc_setAssociatedObject` on the
+    /// utterance) and only mutate state if it matches `currentSessionID`,
+    /// so a late `didCancel` from an old, stopped utterance can't clobber
+    /// the state of the utterance that started immediately after.
     private var currentSessionID: UInt64 = 0
     private static var sessionKey: UInt8 = 0
 
@@ -74,10 +73,9 @@ final class AudioBriefPlayer: NSObject, ObservableObject {
         synthesizer.speak(utter)
     }
 
-    /// Attempt to pause; only mutates state when the synthesizer
-    /// confirms the transition. FIX (codex review PR #32 P2): previously
-    /// `state` flipped to `.paused` unconditionally, even when the
-    /// utterance had finished and the pause call returned `false`.
+    /// Attempt to pause; only mutates state when the synthesizer confirms
+    /// the transition — the pause call returns `false` when the utterance
+    /// has already finished.
     func pause() {
         guard case .playing(let id) = state else { return }
         let didPause = synthesizer.pauseSpeaking(at: .word)
@@ -105,8 +103,8 @@ extension AudioBriefPlayer: AVSpeechSynthesizerDelegate {
         didFinish utterance: AVSpeechUtterance
     ) {
         Task { @MainActor in
-            // FIX (codex review PR #32 P1): only clear state if this
-            // callback belongs to the currently-active session.
+            // Only clear state if this callback belongs to the
+            // currently-active session.
             guard let sid = sessionID(for: utterance), sid == currentSessionID else { return }
             // Match both `.playing` and `.paused` — `didFinish` can fire
             // on a stale utterance after pause in some macOS releases.
@@ -124,10 +122,9 @@ extension AudioBriefPlayer: AVSpeechSynthesizerDelegate {
         didCancel utterance: AVSpeechUtterance
     ) {
         Task { @MainActor in
-            // FIX (codex review PR #32/#43 P1): a stale cancel from the
-            // previously-stopped utterance must NOT reset the state of
-            // the new utterance that started immediately after. Compare
-            // the per-utterance session id.
+            // A stale cancel from the previously-stopped utterance must
+            // NOT reset the state of the new utterance that started
+            // immediately after — compare the per-utterance session id.
             guard let sid = sessionID(for: utterance), sid == currentSessionID else { return }
             state = .idle
             currentReportID = nil

@@ -51,6 +51,44 @@ enum SelfCheck {
             if !condition { passed = false }
         }
 
+        // Exercise migration drift in an isolated database, including the
+        // conflicting v17 used by early builds of the maintenance branch.
+        do {
+            let db = try DatabaseQueue()
+            try Schema.migrator().migrate(db)
+            try await db.write { db in
+                try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier = 'v18'")
+                for column in ["title", "embedding", "big_story_score", "big_story_headline",
+                               "sentiment", "sentiment_rationale"] {
+                    try db.execute(sql: "ALTER TABLE report DROP COLUMN \(column)")
+                }
+                try db.execute(sql: "DROP INDEX report_on_preset_generated")
+                try db.execute(sql: "DROP INDEX report_on_kind")
+            }
+            try Schema.migrator().migrate(db)
+            let repaired = try await db.read { db in Set(try db.columns(in: "report").map(\.name)) }
+            check("v18: repairs missing report columns after recorded v17",
+                  Set(["title", "embedding", "big_story_score", "big_story_headline",
+                       "sentiment", "sentiment_rationale"]).isSubset(of: repaired))
+            let indexes = try await db.read { db in
+                Set(try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'index'"))
+            }
+            check("v18: repairs indexes absent from the earlier v17 variant",
+                  indexes.contains("report_on_preset_generated") && indexes.contains("report_on_kind"))
+            try Schema.migrator().migrate(db)
+            check("v18: rerunning migrations is safe", true)
+        } catch {
+            check("v18: migration repair (\(error))", false)
+        }
+
+        struct JSONProbe: Decodable { let value: Int }
+        check("LLMJSON.decode: fenced object",
+              LLMJSON.decode(JSONProbe.self, from: "```JSON\n{\"value\":7}\n```")?.value == 7)
+        check("LLMJSON.decode: array surrounded by prose",
+              LLMJSON.decode([JSONProbe].self, from: "Result: [{\"value\":8}] done")?.first?.value == 8)
+        check("LLMJSON.decode: malformed payload returns nil",
+              LLMJSON.decode(JSONProbe.self, from: "{\"value\":}") == nil)
+
         // FIX (codex review PR #36): use a unique per-run namespace so
         // the seen-index never suppresses items from a prior self-check.
         // Previously the hard-coded `mock.example/one|two` URLs were
