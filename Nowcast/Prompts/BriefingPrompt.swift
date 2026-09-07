@@ -6,7 +6,9 @@ enum BriefingPrompt {
     static func render(topic: String,
                        window: TimeWindow,
                        items: [RawItem],
-                       avoidHint: String? = nil) -> String {
+                       avoidHint: String? = nil,
+                       depth: BriefDepth = .standard,
+                       tone: BriefTone = .neutral) -> String {
         let dateString: String = {
             let f = DateFormatter()
             f.dateStyle = .medium
@@ -21,9 +23,19 @@ enum BriefingPrompt {
 
         let avoidBlock = avoidHint.map { "\n\($0)\n" } ?? ""
 
+        let styleBlock = depth == .standard && tone == .neutral ? "" : """
+
+        # Style
+        Depth: \(depth.displayName). \(depth.instruction)
+        Tone: \(tone.displayName). \(tone.instruction)
+        These style choices override generic length and tone guidance below, while preserving every required section, citation rule, and the JSON footer.
+
+        """
+
         return """
-        You are writing a short, opinionated briefing for a busy reader who wants to catch up on a topic without reading every link.
+        You are writing a factual briefing for a busy reader who wants to catch up on a topic without reading every link.
         \(avoidBlock)
+        \(styleBlock)
         # Topic
         \(topic)
 
@@ -49,7 +61,7 @@ enum BriefingPrompt {
         - A short list of source links (use Markdown link syntax with the original urls)
 
         ## Signal
-        2–4 sentences with an opinionated take: trend shift, who's winning/losing, contrarian angle, what to watch next. Be specific, not generic. If the inputs are too thin for a real signal, say so plainly.
+        2–4 sentences explaining supported trends, implications, and what to watch next. Be specific, not generic. If the inputs are too thin for a real signal, say so plainly.
 
         ## Sources
         Group the source links by source type (e.g. "Hacker News", "YouTube", "Reddit") with bullet links. Every source listed must be used in a Story above.

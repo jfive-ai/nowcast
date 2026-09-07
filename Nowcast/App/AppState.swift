@@ -335,7 +335,9 @@ final class AppState: ObservableObject {
             topic: preset.query,
             window: preset.window,
             sources: preset.sources,
-            presetID: preset.id
+            presetID: preset.id,
+            depth: preset.depth,
+            tone: preset.tone
         )
         try? storage.updatePresetLastRun(id: preset.id, at: Date())
         loadPresets()
@@ -349,7 +351,9 @@ final class AppState: ObservableObject {
     private func runPipeline(topic: String,
                              window: TimeWindow,
                              sources: [SourceKind],
-                             presetID: UUID?) async {
+                             presetID: UUID?,
+                             depth: BriefDepth = .standard,
+                             tone: BriefTone = .neutral) async {
         guard let pipeline else {
             lastError = missingProviderMessage
             return
@@ -399,6 +403,8 @@ final class AppState: ObservableObject {
                 sources: sources,
                 presetID: presetID,
                 subscriptions: subscriptions,
+                depth: depth,
+                tone: tone,
                 progress: { [weak self] stage in
                     Task { @MainActor [weak self] in
                         self?.generation?.push(stage)

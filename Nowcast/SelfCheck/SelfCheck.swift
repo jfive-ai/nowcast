@@ -81,6 +81,8 @@ enum SelfCheck {
             check("v18: migration repair (\(error))", false)
         }
 
+        await PersonalizationSelfCheck.run(storage: storage, check: check)
+
         struct JSONProbe: Decodable { let value: Int }
         check("LLMJSON.decode: fenced object",
               LLMJSON.decode(JSONProbe.self, from: "```JSON\n{\"value\":7}\n```")?.value == 7)

@@ -347,6 +347,14 @@ enum Schema {
                 """)
         }
 
+        // v19: per-preset briefing style. Older presets retain standard/neutral defaults.
+        m.registerMigration("v19") { db in
+            try db.alter(table: "topic_preset") { t in
+                t.add(column: "depth", .text).notNull().defaults(to: "standard")
+                t.add(column: "tone", .text).notNull().defaults(to: "neutral")
+            }
+        }
+
         return m
     }
 
