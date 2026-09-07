@@ -107,7 +107,7 @@ struct ContentView: View {
                     .fill(Color.accentColor.opacity(0.12))
                     .frame(width: 92, height: 92)
                 Image(systemName: "newspaper")
-                    .font(.system(size: 38, weight: .light))
+                    .font(.largeTitle.weight(.light))
                     .foregroundStyle(Color.accentColor)
                     .accessibilityHidden(true)
             }
@@ -138,7 +138,7 @@ struct ContentView: View {
                     .fill(Color.accentColor.opacity(0.12))
                     .frame(width: 92, height: 92)
                 Image(systemName: "key.horizontal")
-                    .font(.system(size: 34, weight: .light))
+                    .font(.largeTitle.weight(.light))
                     .foregroundStyle(Color.accentColor)
                     .accessibilityHidden(true)
             }
