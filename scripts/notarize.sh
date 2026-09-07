@@ -38,7 +38,14 @@ for command in xcodegen xcodebuild xcrun security codesign spctl ditto python3; 
   command -v "$command" >/dev/null || fail "Required tool not found: $command"
 done
 identities="$(security find-identity -v -p codesigning)"
-[[ "$identities" == *"Developer ID Application:"*"($NOWCAST_DEVELOPMENT_TEAM)"* ]] || fail 'No Developer ID Application signing identity found for the selected team.'
+matching_identity=false
+while IFS= read -r identity; do
+  if [[ "$identity" == *"Developer ID Application:"*"($NOWCAST_DEVELOPMENT_TEAM)"* ]]; then
+    matching_identity=true
+    break
+  fi
+done <<< "$identities"
+[[ "$matching_identity" == true ]] || fail 'No Developer ID Application signing identity found for the selected team.'
 mkdir -p "$release_dir"
 release_dir="$(cd "$release_dir" && pwd)"
 export NOWCAST_RELEASE_OUTPUT="$release_dir"

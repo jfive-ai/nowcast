@@ -15,7 +15,10 @@ args = sys.argv[1:]
 with open(os.environ['MOCK_TRACE'], 'a') as out:
     out.write(json.dumps([name, *args]) + '\n')
 if name == 'security':
-    if not os.environ.get('MOCK_NO_IDENTITY'):
+    if os.environ.get('MOCK_MIXED_IDENTITY'):
+        print('1) HASH \"Developer ID Application: Other (ZZZZZ99999)\"')
+        print('2) HASH \"Apple Development: Nowcast (ABCDE12345)\"')
+    elif not os.environ.get('MOCK_NO_IDENTITY'):
         print('1) HASH "Developer ID Application: Nowcast (ABCDE12345)"')
 elif name == 'xcodebuild' and '-exportArchive' in args:
     (Path(args[args.index('-exportPath') + 1]) / 'Nowcast.app').mkdir(parents=True)
@@ -61,6 +64,11 @@ class NotarizeTests(unittest.TestCase):
 
     def test_no_identity_stops_before_build(self):
         self.env['MOCK_NO_IDENTITY'] = '1'
+        self.assertNotEqual(self.run_script().returncode, 0)
+        self.assertEqual([c[0] for c in self.calls()], ['security'])
+
+    def test_developer_id_must_match_team_on_the_same_identity(self):
+        self.env['MOCK_MIXED_IDENTITY'] = '1'
         self.assertNotEqual(self.run_script().returncode, 0)
         self.assertEqual([c[0] for c in self.calls()], ['security'])
 
