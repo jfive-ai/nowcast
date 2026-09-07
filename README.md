@@ -2,7 +2,7 @@
 
 A native macOS app that turns hours of scattered information into a 2-minute markdown brief on the topics you care about — pulling from YouTube, X, Reddit, Hacker News, news, RSS, and the open web, with scheduled reports, dedup, history, and retention controls.
 
-**Status:** Early planning. See [`docs/PLAN.md`](docs/PLAN.md) for the full project spec and phased roadmap.
+**Status:** Phases 1–8 shipped (manual + scheduled briefings, multi-source adapters, multi-LLM, chat, entities, semantic search, analytics). Now in a production-hardening pass. See [`docs/PLAN.md`](docs/PLAN.md) for the full project spec and phased roadmap.
 
 ## Stack
 
@@ -26,3 +26,31 @@ A native macOS app that turns hours of scattered information into a 2-minute mar
 | v3    | Multi-LLM, cost tracking, export, Spotlight indexing |
 
 Each phase ships as a separate PR against `main` from a `phase/<n>-<slug>` branch.
+
+## Testing & CI
+
+There is no XCTest target yet; the regression net is an in-app `SelfCheck`
+harness that runs the production `ReportPipeline` against a real database with
+a mock LLM and asserts every persisted artifact materialized correctly.
+
+Run it headlessly (DEBUG builds only):
+
+```bash
+xcodegen generate
+xcodebuild -project Nowcast.xcodeproj -scheme Nowcast -configuration Debug \
+  -derivedDataPath .build CODE_SIGN_ENTITLEMENTS= build
+NOWCAST_SELF_CHECK=1 NOWCAST_SUPPORT_DIR="$(mktemp -d)" \
+  .build/Build/Products/Debug/Nowcast.app/Contents/MacOS/Nowcast
+echo "exit $?"   # 0 = pass, 1 = fail
+```
+
+- `NOWCAST_SELF_CHECK=1` makes the app run the self-check and exit instead of
+  showing UI.
+- `NOWCAST_SUPPORT_DIR=<dir>` redirects the database + reports into a throwaway
+  directory so a run never touches `~/Library/Application Support/Nowcast`.
+  This requires the sandbox-disabled build above (`CODE_SIGN_ENTITLEMENTS=`),
+  since the sandbox blocks writes outside the app container. Production and
+  release builds keep the app sandbox.
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs exactly this on
+every push and pull request.

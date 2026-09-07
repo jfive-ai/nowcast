@@ -298,14 +298,30 @@ enum Schema {
             }
         }
 
-        // v17: repair `report` tables whose migration ledger says v13–v16
+        // v17: indexes for the hot report filters. v1 indexed `generated_at`
+        // alone, but `preset_id` (compare candidates, prior-report lookup,
+        // per-preset big-story percentile) and `kind` (daily vs weekly
+        // listing) were unindexed — forcing table scans that grow with
+        // history. Additive (CREATE INDEX only); idempotent via IF NOT EXISTS
+        // so a dev DB that already has them migrates cleanly.
+        m.registerMigration("v17") { db in
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS report_on_preset_generated
+                ON report(preset_id, generated_at)
+                """)
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS report_on_kind ON report(kind)
+                """)
+        }
+
+        // v18: repair `report` tables whose migration ledger says v13–v16
         // ran but where a column is missing. This happens when a dev build
         // from an in-flight branch recorded one of those identifiers with
         // different contents before the final migration list shipped (the
         // observed case: `embedding` absent while v14 is marked applied,
         // silently breaking semantic search). Conditional adds are
         // idempotent and a no-op for healthy databases.
-        m.registerMigration("v17") { db in
+        m.registerMigration("v18") { db in
             let existing = Set(try db.columns(in: "report").map(\.name))
             let wanted: [(String, Database.ColumnType)] = [
                 ("title", .text),
@@ -320,6 +336,15 @@ enum Schema {
                     t.add(column: name, type)
                 }
             }
+            // Early maintenance builds used v17 for the column repair,
+            // so their ledger can say v17 ran without these indexes.
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS report_on_preset_generated
+                ON report(preset_id, generated_at)
+                """)
+            try db.execute(sql: """
+                CREATE INDEX IF NOT EXISTS report_on_kind ON report(kind)
+                """)
         }
 
         return m

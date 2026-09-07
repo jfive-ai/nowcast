@@ -1,9 +1,12 @@
 import SwiftUI
+import AppKit
 
 /// Live stage-by-stage timeline overlaid while a report is being generated
 ///. Bound to `AppState.generation`.
 struct ProgressTimelineView: View {
     let state: GenerationState
+    /// Stop the in-flight generation. When nil, no Stop button is shown.
+    var onCancel: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -16,6 +19,33 @@ struct ProgressTimelineView: View {
         .background(.regularMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .shadow(radius: 16)
+        // prod-38: announce each new stage so VoiceOver users aren't left
+        // staring at a silent, frequently-updating overlay.
+        .onChange(of: state.history.count) { _ in
+            guard let latest = latestStageText else { return }
+            announce(latest)
+        }
+    }
+
+    /// Post a VoiceOver announcement for the latest stage. Uses the modern
+    /// SwiftUI API on macOS 14+ and the AppKit notification on macOS 13
+    /// (the app's deployment target).
+    private func announce(_ text: String) {
+        if #available(macOS 14, *) {
+            AccessibilityNotification.Announcement(text).post()
+        } else {
+            NSAccessibility.post(
+                element: NSApp as Any,
+                notification: .announcementRequested,
+                userInfo: [.announcement: text]
+            )
+        }
+    }
+
+    /// The most-recent stage's label, used for both the header's
+    /// accessibility value and live announcements.
+    private var latestStageText: String? {
+        (state.current ?? state.history.last?.stage)?.displayName
     }
 
     // MARK: - Sections
@@ -33,8 +63,23 @@ struct ProgressTimelineView: View {
             Text(elapsedString)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
+            if let onCancel {
+                Button(role: .destructive, action: onCancel) {
+                    Image(systemName: "stop.fill")
+                }
+                .buttonStyle(.borderless)
+                .help("Stop generating")
+                .accessibilityLabel("Stop generating")
+            }
         }
         .padding(12)
+        // prod-38: expose the live progress to VoiceOver. The header is a
+        // container so the Stop button stays its own focusable element while
+        // the status text/value carries the current stage.
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Generating brief for \(state.topic)")
+        .accessibilityValue(latestStageText ?? "")
+        .accessibilityAddTraits(.updatesFrequently)
     }
 
     private var timeline: some View {
@@ -60,6 +105,7 @@ struct ProgressTimelineView: View {
                     .font(.caption)
                     .foregroundStyle(failed ? Color.red : (active ? Color.accentColor : .secondary))
                     .symbolVariant(active ? .fill : .none)
+                    .accessibilityHidden(true)
                 if !isLast {
                     Rectangle()
                         .fill(Color.secondary.opacity(0.30))

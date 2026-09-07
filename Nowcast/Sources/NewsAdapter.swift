@@ -15,7 +15,7 @@ struct NewsAdapter: SourceAdapter {
     private let session: URLSession
     private let locale: String
 
-    init(session: URLSession = .shared, locale: String = "en-US") {
+    init(session: URLSession = HTTPSessions.standard, locale: String = "en-US") {
         self.session = session
         self.locale = locale
     }
@@ -32,8 +32,11 @@ struct NewsAdapter: SourceAdapter {
         request.setValue("Nowcast/0.1", forHTTPHeaderField: "User-Agent")
 
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .news)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw SourceError.from(status: http.statusCode, response: http, kind: .news)
         }
 
         let feed = try Self.parseRSS(data: data)

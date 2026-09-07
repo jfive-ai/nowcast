@@ -3,7 +3,11 @@ import GRDB
 
 /// Owns the SQLite connection and the markdown-reports filesystem.
 /// Single instance, created at app launch.
-final class StorageManager {
+///
+/// `@unchecked Sendable`: the only stored property is GRDB's `DatabaseQueue`,
+/// which is itself thread-safe (it serializes all reads/writes), so the manager
+/// is safe to call from any thread — e.g. the off-main search task (prod-29).
+final class StorageManager: @unchecked Sendable {
     let dbQueue: DatabaseQueue
 
     init() throws {
@@ -12,6 +16,18 @@ final class StorageManager {
         config.foreignKeysEnabled = true
         self.dbQueue = try DatabaseQueue(path: dbURL.path, configuration: config)
         try Schema.migrator().migrate(dbQueue)
+    }
+
+    /// Names of all indexes on `table`. Used by the self-check to assert
+    /// migrations actually created their indexes (not just that they ran).
+    func indexNames(onTable table: String) throws -> [String] {
+        try dbQueue.read { db in
+            try String.fetchAll(
+                db,
+                sql: "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = ?",
+                arguments: [table]
+            )
+        }
     }
 
     // MARK: - Reports
@@ -191,6 +207,81 @@ final class StorageManager {
         return stale.map(\.id)
     }
 
+    /// Total recorded LLM spend (USD) for reports generated at/after `since`.
+    /// Used by the monthly spend guardrail.
+    func spend(since: Date) throws -> Double {
+        try dbQueue.read { db in
+            try Double.fetchOne(db,
+                sql: "SELECT COALESCE(SUM(usd_cost), 0) FROM report WHERE generated_at >= ?",
+                arguments: [since]) ?? 0
+        }
+    }
+
+    /// How many reports are older than `cutoff` (so callers can decide whether
+    /// a destructive retention prune is about to remove anything).
+    func reportCount(olderThan cutoff: Date) throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM report WHERE generated_at < ?",
+                             arguments: [cutoff]) ?? 0
+        }
+    }
+
+    // MARK: - Backup
+
+    static let backupDirName = "backups"
+
+    /// Write a consistent point-in-time copy of the database into
+    /// `Application Support/Nowcast/backups/`, keeping at most `maxBackups`
+    /// (oldest pruned). Uses `VACUUM INTO` for a clean, lock-free snapshot
+    /// (no partial-WAL surprises). Returns the new backup's URL.
+    ///
+    /// Called automatically before a destructive retention prune so a user who
+    /// set an aggressive retention window can recover if it removed too much.
+    @discardableResult
+    func backupDatabase(maxBackups: Int = 5) throws -> URL {
+        let dir = AppPaths.supportDirectory.appendingPathComponent(Self.backupDirName, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let stamp = Self.backupStampFormatter.string(from: Date())
+        let dest = dir.appendingPathComponent("nowcast-\(stamp)-\(UUID().uuidString.prefix(6)).sqlite")
+        try? FileManager.default.removeItem(at: dest)
+        // VACUUM INTO can't run inside a transaction.
+        try dbQueue.writeWithoutTransaction { db in
+            try db.execute(sql: "VACUUM INTO ?", arguments: [dest.path])
+        }
+        Self.pruneBackups(in: dir, keeping: max(1, maxBackups))
+        return dest
+    }
+
+    /// All backup files on disk, newest first.
+    func listBackups() -> [URL] {
+        let dir = AppPaths.supportDirectory.appendingPathComponent(Self.backupDirName, isDirectory: true)
+        return Self.sortedBackups(in: dir)
+    }
+
+    private static func sortedBackups(in dir: URL) -> [URL] {
+        let files = (try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: [.creationDateKey]))?
+            .filter { $0.pathExtension == "sqlite" } ?? []
+        return files.sorted { a, b in
+            let da = (try? a.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+            let db = (try? b.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? .distantPast
+            return da > db
+        }
+    }
+
+    private static func pruneBackups(in dir: URL, keeping: Int) {
+        for old in sortedBackups(in: dir).dropFirst(keeping) {
+            try? FileManager.default.removeItem(at: old)
+        }
+    }
+
+    private static let backupStampFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.dateFormat = "yyyyMMdd-HHmmss-SSS"
+        return f
+    }()
+
     /// Most-recent report ID, if any. Used as a synthetic anchor for
     /// source-health rows on noFreshItems runs.
     func mostRecentReportID() throws -> UUID? {
@@ -202,13 +293,30 @@ final class StorageManager {
         }
     }
 
-    private func delete(reports: [Report]) throws {
-        for r in reports {
-            let url = AppPaths.reportURL(for: r.markdownPath)
-            try? FileManager.default.removeItem(at: url)
+    /// Add token/cost to a report's running totals. Used for aux LLM calls
+    /// (e.g. entity extraction) that run AFTER the report row is inserted, so
+    /// their spend isn't silently dropped from the cost the user sees (prod-13).
+    func addReportUsage(reportID: UUID, promptTokens: Int, completionTokens: Int, usdCost: Double) throws {
+        guard promptTokens > 0 || completionTokens > 0 || usdCost > 0 else { return }
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                UPDATE report SET
+                    prompt_tokens = COALESCE(prompt_tokens, 0) + ?,
+                    completion_tokens = COALESCE(completion_tokens, 0) + ?,
+                    usd_cost = COALESCE(usd_cost, 0) + ?
+                WHERE id = ?
+                """, arguments: [promptTokens, completionTokens, usdCost, reportID.uuidString])
         }
+    }
+
+    private func delete(reports: [Report]) throws {
         let ids = reports.map(\.id.uuidString)
         guard !ids.isEmpty else { return }
+        // prod-12: commit the DB delete FIRST, then remove the markdown files.
+        // If the write throws (and rolls back), the rows — and their
+        // markdown_path — survive, so we never strand a report row pointing at
+        // a file we already deleted. Files orphaned by a later crash are
+        // harmless (and reclaimable); a row pointing at a missing file is not.
         try dbQueue.write { db in
             let placeholders = Array(repeating: "?", count: ids.count).joined(separator: ",")
             // Purge FTS shadow rows when their parent report is deleted,
@@ -218,10 +326,19 @@ final class StorageManager {
                 sql: "DELETE FROM report_fts WHERE report_id IN (\(placeholders))",
                 arguments: StatementArguments(ids)
             )
-            // Items belonging only to deleted reports should also be
-            // pruned from item_fts. Items remain in `item` (cascade
-            // doesn't cover the FTS table), so we drop their FTS rows
-            // when the join leaves no parent report.
+            // Delete the reports FIRST so the `report_item` cascade fires;
+            // only then can we tell which `item` rows are truly orphaned.
+            // (Previously the orphan cleanup ran *before* this delete, so the
+            // still-present report_item links made nothing look orphaned and
+            // item / item_fts rows leaked.)
+            try db.execute(
+                sql: "DELETE FROM report WHERE id IN (\(placeholders))",
+                arguments: StatementArguments(ids)
+            )
+            // prod-11: an `item` (and its item_fts shadow row) that no longer
+            // belongs to ANY report is dead weight — neither cascades from
+            // report deletion. The seen-index lives in a separate table, so
+            // dropping the item row doesn't affect dedup.
             try db.execute(sql: """
                 DELETE FROM item_fts
                 WHERE item_id IN (
@@ -231,19 +348,62 @@ final class StorageManager {
                     )
                 )
                 """)
-            try db.execute(
-                sql: "DELETE FROM report WHERE id IN (\(placeholders))",
-                arguments: StatementArguments(ids)
-            )
+            try db.execute(sql: """
+                DELETE FROM item
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM report_item ri WHERE ri.item_id = item.id
+                )
+                """)
         }
+        // DB committed — now it's safe to remove the markdown files.
+        for r in reports {
+            try? FileManager.default.removeItem(at: AppPaths.reportURL(for: r.markdownPath))
+        }
+    }
+
+    /// Delete specific reports by id (History context menu, self-check).
+    /// Returns the ids actually found and deleted. Prunes now-orphaned items.
+    @discardableResult
+    func deleteReports(ids: [UUID]) throws -> [UUID] {
+        guard !ids.isEmpty else { return [] }
+        let idStrings = ids.map(\.uuidString)
+        let reports = try dbQueue.read { db -> [Report] in
+            let placeholders = Array(repeating: "?", count: idStrings.count).joined(separator: ",")
+            return try Row.fetchAll(db, sql: """
+                SELECT id, preset_id, topic, window, generated_at, markdown_path, byte_size, source_count, read_at,
+                       prompt_tokens, completion_tokens, usd_cost, model_used, provider_used, kind, title,
+                       big_story_score, big_story_headline, sentiment, sentiment_rationale
+                FROM report
+                WHERE id IN (\(placeholders))
+                """, arguments: StatementArguments(idStrings)).compactMap(Self.makeReport)
+        }
+        try delete(reports: reports)
+        return reports.map(\.id)
     }
 
     /// Re-populate `report_fts` and `item_fts` from the canonical tables
     /// when those FTS tables are detected to be out of sync (e.g. after a
-    /// fresh migration or after a bug emptied them). Idempotent. Also
-    /// covers reports that pre-existed the v8 migration so they're
-    /// searchable immediately.
+    /// fresh migration or after a bug emptied them). Idempotent.
+    /// FIX (codex review PR #31): backfill historical reports that
+    /// pre-existed the v8 migration so they're searchable immediately.
+    /// Reverse reconcile: drop FTS rows whose parent report/item no longer
+    /// exists. The delete path already cleans these, but a report/item that
+    /// vanished another way (migration drift, manual DB edit) would leave an
+    /// orphan FTS row that surfaces as a stale search hit with an empty detail
+    /// view. Cheap, idempotent (prod-46).
+    func reconcileFullTextIndex() throws {
+        try dbQueue.write { db in
+            try db.execute(sql: "DELETE FROM report_fts WHERE report_id NOT IN (SELECT id FROM report)")
+            try db.execute(sql: "DELETE FROM item_fts WHERE item_id NOT IN (SELECT id FROM item)")
+        }
+    }
+
     func backfillFullTextIndexIfNeeded() throws {
+        // prod-46: prune orphaned FTS rows first so the index is consistent in
+        // BOTH directions after this runs (the forward backfill below adds
+        // missing rows; this removes stale ones).
+        try? reconcileFullTextIndex()
+
         // Phase 1: discover what needs backfilling (read-only).
         struct PendingReport { let id: String; let topic: String; let path: String }
         struct PendingItem { let id: String; let title: String; let snippet: String }
@@ -344,6 +504,14 @@ final class StorageManager {
                 sql: "DELETE FROM topic_preset WHERE id = ?",
                 arguments: [id.uuidString]
             )
+            // prod-11: drop this preset's seen-index rows so they don't leak
+            // until the 90-day age-out (and a future preset reusing this id
+            // doesn't inherit a stale seen set). report.preset_id is
+            // ON DELETE SET NULL, so existing reports survive as ad-hoc.
+            try db.execute(
+                sql: "DELETE FROM seen_item WHERE preset_id = ?",
+                arguments: [id.uuidString]
+            )
         }
     }
 
@@ -413,18 +581,26 @@ final class StorageManager {
     @discardableResult
     func upsertItems(_ items: [RawItem]) throws -> [String: UUID] {
         guard !items.isEmpty else { return [:] }
+        let persistedItems = items.map { PersistedItem(from: $0) }
         return try dbQueue.write { db in
             var result: [String: UUID] = [:]
-            for raw in items {
-                let persisted = PersistedItem(from: raw)
-                if let existing = try Row.fetchOne(db,
-                    sql: "SELECT id FROM item WHERE url_hash = ? LIMIT 1",
-                    arguments: [persisted.urlHash]) {
-                    if let idString: String = existing["id"], let uuid = UUID(uuidString: idString) {
-                        result[persisted.urlHash] = uuid
-                    }
-                    continue
+            // FIX (prod-30): resolve existing ids for ALL input hashes in one
+            // query instead of a per-item SELECT (N+1). New items are inserted;
+            // duplicates within the batch collapse via the `result` map.
+            let hashes = Array(Set(persistedItems.map(\.urlHash)))
+            let placeholders = Array(repeating: "?", count: hashes.count).joined(separator: ",")
+            let existing = try GRDB.Row.fetchAll(db,
+                sql: "SELECT url_hash, id FROM item WHERE url_hash IN (\(placeholders))",
+                arguments: StatementArguments(hashes))
+            for row in existing {
+                if let h: String = row["url_hash"],
+                   let idString: String = row["id"],
+                   let uuid = UUID(uuidString: idString) {
+                    result[h] = uuid
                 }
+            }
+            for persisted in persistedItems {
+                if result[persisted.urlHash] != nil { continue }
                 try db.execute(sql: """
                     INSERT INTO item
                       (id, canonical_url, url_hash, title, snippet, transcript,
@@ -1068,10 +1244,20 @@ final class StorageManager {
 
     /// Inserts a mention row. `INSERT OR IGNORE` because the natural key
     /// (entity, report, cluster) is the primary key — a duplicate just
-    /// no-ops when the extractor runs twice. `mention_count` is bumped
-    /// only when the INSERT actually affected a row (checked via
-    /// `changes()` inside the same write transaction), so the counter
-    /// can't drift above the real mention count.
+    /// no-ops, which is exactly what we want when the extractor runs twice.
+    /// FIX (codex review PRs #56/#67 P1): increment `mention_count` only
+    /// when the INSERT actually affected a row (i.e. this is a genuinely
+    /// new (entity, report, cluster) tuple), via `changes()` inside the
+    /// same write transaction. Prevents the counter from drifting above
+    /// the real mention count when extraction re-runs.
+    /// The `entity_mention.cluster_id` value for an optional cluster id.
+    /// entity_mention's PK includes cluster_id, and SQLite treats NULL as
+    /// distinct in a unique key — so a nil would let `INSERT OR IGNORE`
+    /// duplicate a report-level mention and drift `mention_count`. We coerce
+    /// nil to "" (report-level sentinel) through this single helper so every
+    /// caller agrees on the key.
+    static func entityMentionClusterKey(_ clusterID: String?) -> String { clusterID ?? "" }
+
     func recordEntityMention(entityID: UUID, reportID: UUID, clusterID: String?) throws {
         try dbQueue.write { db in
             try db.execute(sql: """
@@ -1080,7 +1266,7 @@ final class StorageManager {
                 """, arguments: [
                     entityID.uuidString,
                     reportID.uuidString,
-                    clusterID ?? "",
+                    Self.entityMentionClusterKey(clusterID),
                 ])
             // SQLite's `changes()` returns 1 when the INSERT actually
             // wrote a row, 0 when OR IGNORE skipped it.
@@ -1091,6 +1277,33 @@ final class StorageManager {
                     WHERE id = ?
                     """, arguments: [entityID.uuidString])
             }
+        }
+    }
+
+    /// Repair pass: drop `entity_mention` rows whose non-empty `cluster_id`
+    /// references a cluster that no longer exists (entity_mention has no FK to
+    /// cluster), then recompute every entity's `mention_count` from the
+    /// surviving rows so the counter can't have drifted (prod-36). The empty
+    /// "" key (report-level mention) is always kept.
+    func pruneDanglingEntityMentions() throws {
+        try dbQueue.write { db in
+            try db.execute(sql: """
+                DELETE FROM entity_mention
+                WHERE cluster_id <> '' AND cluster_id NOT IN (SELECT id FROM cluster)
+                """)
+            try db.execute(sql: """
+                UPDATE entity SET mention_count =
+                    (SELECT COUNT(*) FROM entity_mention WHERE entity_id = entity.id)
+                """)
+        }
+    }
+
+    /// Count of `entity_mention` rows with the given `cluster_id`.
+    /// (Diagnostics / self-check.)
+    func entityMentionCount(clusterID: String) throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM entity_mention WHERE cluster_id = ?",
+                             arguments: [clusterID]) ?? 0
         }
     }
 
@@ -1192,6 +1405,21 @@ final class StorageManager {
             var hostByCanonicalURL: [String: String] = [:]
             for item in items { hostByCanonicalURL[item.url] = item.host }
 
+            // FIX (prod-30): pull ALL cluster feedback in ONE grouped query
+            // instead of one query per cluster (an N+1 that scaled with the
+            // user's cluster history on every popover hover). Index it by
+            // cluster id, then look up in-memory inside the loop.
+            var feedbackByCluster: [String: [String: Int]] = [:]
+            let feedbackRows = try GRDB.Row.fetchAll(db, sql: """
+                SELECT target_id, kind, COUNT(*) AS n FROM feedback
+                WHERE target = 'cluster'
+                GROUP BY target_id, kind
+                """)
+            for r in feedbackRows {
+                guard let tid: String = r["target_id"], let kind: String = r["kind"] else { continue }
+                feedbackByCluster[tid, default: [:]][kind] = r["n"] ?? 0
+            }
+
             for row in clusterRows {
                 guard let cid: String = row["cluster_id"],
                       let citationsJSON: String = row["cit"]
@@ -1200,15 +1428,7 @@ final class StorageManager {
                 let hosts = Set(urls.compactMap { hostByCanonicalURL[$0] })
                 guard !hosts.isEmpty else { continue }
 
-                // Pull this cluster's feedback ONCE.
-                let counts = try GRDB.Row.fetchAll(db, sql: """
-                    SELECT kind, COUNT(*) AS n FROM feedback
-                    WHERE target = 'cluster' AND target_id = ?
-                    GROUP BY kind
-                    """, arguments: [cid])
-                for c in counts {
-                    let kind: String = c["kind"] ?? ""
-                    let n: Int = c["n"] ?? 0
+                for (kind, n) in feedbackByCluster[cid] ?? [:] {
                     for host in hosts {
                         switch kind {
                         case "thumbs_up":     byHost[host, default: Row()].thumbsUp += n
@@ -1280,6 +1500,23 @@ final class StorageManager {
                     VALUES (?, ?, ?)
                     """, arguments: [presetKey, item.urlHash, now])
             }
+        }
+    }
+
+    /// Whether an `item` row with the given URL hash currently exists.
+    /// (Diagnostics / self-check for orphan pruning.)
+    func itemExists(urlHash: String) throws -> Bool {
+        try dbQueue.read { db in
+            try Bool.fetchOne(db, sql: "SELECT EXISTS(SELECT 1 FROM item WHERE url_hash = ?)",
+                              arguments: [urlHash]) ?? false
+        }
+    }
+
+    /// Count of `seen_item` rows recorded for a preset. (Diagnostics / self-check.)
+    func seenItemCount(presetID: UUID) throws -> Int {
+        try dbQueue.read { db in
+            try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM seen_item WHERE preset_id = ?",
+                             arguments: [presetID.uuidString]) ?? 0
         }
     }
 

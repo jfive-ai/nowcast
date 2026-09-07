@@ -1,5 +1,6 @@
 #if DEBUG
 import Foundation
+import GRDB
 
 /// One-click self-check that exercises every Phase-4 code path against the
 /// real DB without spending on a live LLM. Run from Settings → Pipeline →
@@ -13,21 +14,80 @@ import Foundation
 @MainActor
 enum SelfCheck {
     struct Result {
+        struct Check { let label: String; let passed: Bool }
         let passed: Bool
         let lines: [String]
+        let checks: [Check]
         var summary: String { lines.joined(separator: "\n") }
+
+        /// Machine-readable summary for CI parsing (prod-27). Emitted to stdout
+        /// by the headless runner when NOWCAST_SELF_CHECK_JSON=1.
+        var jsonSummary: String {
+            let dict: [String: Any] = [
+                "passed": passed,
+                "total": checks.count,
+                "failed": checks.filter { !$0.passed }.count,
+                "checks": checks.map { ["label": $0.label, "passed": $0.passed] },
+            ]
+            guard let data = try? JSONSerialization.data(
+                    withJSONObject: dict, options: [.prettyPrinted, .sortedKeys]),
+                  let str = String(data: data, encoding: .utf8) else {
+                return "{\"passed\": \(passed)}"
+            }
+            return str
+        }
     }
 
     /// Runs against the *real* StorageManager so the user can inspect the
     /// resulting rows in the Settings → Storage panel afterwards.
     static func run(storage: StorageManager) async -> Result {
         var lines: [String] = []
+        var checks: [Result.Check] = []
         var passed = true
 
         func check(_ label: String, _ condition: Bool) {
             lines.append("\(condition ? "✓" : "✗") \(label)")
+            checks.append(Result.Check(label: label, passed: condition))
             if !condition { passed = false }
         }
+
+        // Exercise migration drift in an isolated database, including the
+        // conflicting v17 used by early builds of the maintenance branch.
+        do {
+            let db = try DatabaseQueue()
+            try Schema.migrator().migrate(db)
+            try await db.write { db in
+                try db.execute(sql: "DELETE FROM grdb_migrations WHERE identifier = 'v18'")
+                for column in ["title", "embedding", "big_story_score", "big_story_headline",
+                               "sentiment", "sentiment_rationale"] {
+                    try db.execute(sql: "ALTER TABLE report DROP COLUMN \(column)")
+                }
+                try db.execute(sql: "DROP INDEX report_on_preset_generated")
+                try db.execute(sql: "DROP INDEX report_on_kind")
+            }
+            try Schema.migrator().migrate(db)
+            let repaired = try await db.read { db in Set(try db.columns(in: "report").map(\.name)) }
+            check("v18: repairs missing report columns after recorded v17",
+                  Set(["title", "embedding", "big_story_score", "big_story_headline",
+                       "sentiment", "sentiment_rationale"]).isSubset(of: repaired))
+            let indexes = try await db.read { db in
+                Set(try String.fetchAll(db, sql: "SELECT name FROM sqlite_master WHERE type = 'index'"))
+            }
+            check("v18: repairs indexes absent from the earlier v17 variant",
+                  indexes.contains("report_on_preset_generated") && indexes.contains("report_on_kind"))
+            try Schema.migrator().migrate(db)
+            check("v18: rerunning migrations is safe", true)
+        } catch {
+            check("v18: migration repair (\(error))", false)
+        }
+
+        struct JSONProbe: Decodable { let value: Int }
+        check("LLMJSON.decode: fenced object",
+              LLMJSON.decode(JSONProbe.self, from: "```JSON\n{\"value\":7}\n```")?.value == 7)
+        check("LLMJSON.decode: array surrounded by prose",
+              LLMJSON.decode([JSONProbe].self, from: "Result: [{\"value\":8}] done")?.first?.value == 8)
+        check("LLMJSON.decode: malformed payload returns nil",
+              LLMJSON.decode(JSONProbe.self, from: "{\"value\":}") == nil)
 
         // FIX (codex review PR #36): use a unique per-run namespace so
         // the seen-index never suppresses items from a prior self-check.
@@ -87,7 +147,11 @@ enum SelfCheck {
                 }
             )
         } catch {
-            return Result(passed: false, lines: ["✗ Pipeline.generate threw: \(error.localizedDescription)"])
+            return Result(
+                passed: false,
+                lines: ["✗ Pipeline.generate threw: \(error.localizedDescription)"],
+                checks: [Result.Check(label: "Pipeline.generate threw: \(error.localizedDescription)", passed: false)]
+            )
         }
 
         // P4-1: items + report_item links
@@ -430,9 +494,372 @@ enum SelfCheck {
             lines.append("• P8-1: NLEmbedding unavailable on this build — semantic-search assertions skipped")
         }
 
+        // prod-03: outbound URL policy blocks SSRF targets but allows public hosts.
+        check("SSRF: public https host allowed",
+              OutboundURLPolicy.allows(URL(string: "https://example.com/feed.xml")!))
+        check("SSRF: file:// scheme blocked",
+              !OutboundURLPolicy.allows(URL(string: "file:///etc/passwd")!))
+        check("SSRF: localhost blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://localhost:8080/")!))
+        check("SSRF: loopback 127.0.0.1 blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://127.0.0.1/")!))
+        check("SSRF: cloud metadata 169.254.169.254 blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://169.254.169.254/latest/meta-data/")!))
+        check("SSRF: private 10/8 blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://10.1.2.3/")!))
+        check("SSRF: private 192.168/16 blocked",
+              !OutboundURLPolicy.allows(URL(string: "https://192.168.1.1/")!))
+        check("SSRF: .local mDNS name blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://printer.local/feed")!))
+        check("SSRF: trailing-dot localhost. blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://localhost./")!))
+        check("SSRF: trailing-dot printer.local. blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://printer.local./feed")!))
+        check("SSRF: localhost.localdomain blocked",
+              !OutboundURLPolicy.allows(URL(string: "http://localhost.localdomain/")!))
+        check("SSRF: IPv6 loopback ::1 blocked",
+              OutboundURLPolicy.isBlocked(ipv6: [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1]))
+        check("SSRF: IPv6 link-local fe80 blocked",
+              OutboundURLPolicy.isBlocked(ipv6: [0xfe,0x80,0,0,0,0,0,0,0,0,0,0,0,0,0,1]))
+        check("SSRF: IPv6 public 2606:: allowed",
+              !OutboundURLPolicy.isBlocked(ipv6: [0x26,0x06,0,0,0,0,0,0,0,0,0,0,0,0,0,1]))
+
+        // prod-05: secret redaction scrubs keys/tokens from error strings.
+        check("Redact: ?key= query param scrubbed",
+              SecretRedactor.redact("GET https://www.googleapis.com/x?part=snippet&key=AIzaSyD1234567890abc failed")
+                .contains("key=***")
+              && !SecretRedactor.redact("a?key=AIzaSyD1234567890abc").contains("AIzaSyD1234567890abc"))
+        check("Redact: bare Google AIza key scrubbed",
+              !SecretRedactor.redact("error with AIzaSyD1234567890abcDEF in it").contains("AIzaSyD1234567890abcDEF"))
+        check("Redact: OpenAI sk- token scrubbed",
+              !SecretRedactor.redact("auth sk-abc123def456ghi789 rejected").contains("sk-abc123def456ghi789"))
+        check("Redact: Bearer token scrubbed",
+              SecretRedactor.redact("Authorization: Bearer abc.def.ghi").contains("Bearer ***"))
+        check("Redact: leaves ordinary text intact",
+              SecretRedactor.redact("No new items found. Try widening the window.")
+                == "No new items found. Try widening the window.")
+
+        // prod-06: SMTP header/command injection sanitizers strip CR/LF.
+        let injectedSubject = SMTPClient.sanitizeHeaderValue("ETH update\r\nBcc: evil@example.com")
+        check("SMTP: header value strips CR/LF",
+              !injectedSubject.contains("\r") && !injectedSubject.contains("\n"))
+        let injectedAddr = SMTPClient.sanitizeAddress("ok@example.com\r\nRCPT TO:<evil@example.com>")
+        check("SMTP: address strips CR/LF + brackets + whitespace",
+              !injectedAddr.contains("\r") && !injectedAddr.contains("\n")
+              && !injectedAddr.contains("<") && !injectedAddr.contains(">")
+              && !injectedAddr.contains(" "))
+        check("SMTP: clean subject preserved",
+              SMTPClient.sanitizeHeaderValue("Nowcast: ethereum (24h)") == "Nowcast: ethereum (24h)")
+        check("SMTP: clean address preserved",
+              SMTPClient.sanitizeAddress("digest@example.com") == "digest@example.com")
+
+        // prod-08: v17 report indexes were actually created.
+        let reportIndexes = (try? storage.indexNames(onTable: "report")) ?? []
+        check("Indexes: report(preset_id, generated_at) exists (got \(reportIndexes.count) total)",
+              reportIndexes.contains("report_on_preset_generated"))
+        check("Indexes: report(kind) exists",
+              reportIndexes.contains("report_on_kind"))
+
+        // prod-11: deleting a report prunes now-orphaned item rows + item_fts;
+        // deleting a preset prunes its seen_item rows.
+        let orphanItem = RawItem(
+            title: "Orphan probe \(runID)",
+            url: URL(string: "https://mock.example/\(runID)/orphan")!,
+            publishedAt: Date(),
+            snippet: "orphan probe",
+            transcript: nil,
+            sourceKind: .hackerNews,
+            author: nil
+        )
+        let orphanIDMap = (try? storage.upsertItems([orphanItem])) ?? [:]
+        let throwaway = Report(
+            id: UUID(), presetID: nil, topic: "Orphan report \(runID)",
+            window: .today, generatedAt: Date(), markdownPath: "",
+            byteSize: 0, sourceCount: 1, kind: .daily
+        )
+        if let storedThrowaway = try? storage.insertReport(throwaway, markdown: "# orphan\n") {
+            try? storage.attachItemsToReport(
+                storedThrowaway.id,
+                itemIDsByHash: orphanIDMap,
+                freshHashes: Set(orphanIDMap.keys)
+            )
+            check("prod-11: orphan item exists before its report is deleted",
+                  (try? storage.itemExists(urlHash: orphanItem.urlHash)) == true)
+            _ = try? storage.deleteReports(ids: [storedThrowaway.id])
+            check("prod-11: orphaned item pruned after its only report is deleted",
+                  (try? storage.itemExists(urlHash: orphanItem.urlHash)) == false)
+        }
+        let seenProbePreset = TopicPreset(
+            name: "Seen probe \(runID)", query: "seen probe", sources: [.hackerNews]
+        )
+        try? storage.upsertPreset(seenProbePreset)
+        try? storage.recordSeen([orphanItem], presetID: seenProbePreset.id)
+        check("prod-11: seen_item recorded for preset before delete",
+              ((try? storage.seenItemCount(presetID: seenProbePreset.id)) ?? 0) >= 1)
+        try? storage.deletePreset(id: seenProbePreset.id)
+        check("prod-11: seen_item pruned when its preset is deleted",
+              (try? storage.seenItemCount(presetID: seenProbePreset.id)) == 0)
+
+        // prod-12: deleting a report also removes its markdown file.
+        let fileProbe = Report(
+            id: UUID(), presetID: nil, topic: "File probe \(runID)",
+            window: .today, generatedAt: Date(), markdownPath: "",
+            byteSize: 0, sourceCount: 1, kind: .daily
+        )
+        if let storedFileProbe = try? storage.insertReport(fileProbe, markdown: "# file probe \(runID)\n") {
+            let fileURL = AppPaths.reportURL(for: storedFileProbe.markdownPath)
+            check("prod-12: report markdown file present after insert",
+                  FileManager.default.fileExists(atPath: fileURL.path))
+            _ = try? storage.deleteReports(ids: [storedFileProbe.id])
+            check("prod-12: report markdown file removed after delete",
+                  !FileManager.default.fileExists(atPath: fileURL.path))
+        }
+
+        // prod-13: the three formerly-untracked aux LLM calls now report token
+        // usage so the pipeline can fold them into the report's cost.
+        let cpTracked = await CounterpointAgent(llm: MockLLMClient()).annotateTracked(briefing)
+        check("prod-13: counterpoint call reports token usage", cpTracked.usage != nil)
+        let titleTrackedResult = await SmartTitler(llm: MockLLMClient())
+            .titleTracked(topic: topic, tldr: ["a", "b"], clusterHeadlines: clusters.map(\.headline))
+        check("prod-13: smart-title call reports token usage", titleTrackedResult.usage != nil)
+        let entTracked = await EntityExtractor(llm: MockLLMClient()).extractTracked(briefing: briefing)
+        check("prod-13: entity-extraction call reports token usage", entTracked.usage != nil)
+
+        // addReportUsage accrues into a report's running cost totals.
+        let usageProbe = Report(
+            id: UUID(), presetID: nil, topic: "Usage probe \(runID)",
+            window: .today, generatedAt: Date(), markdownPath: "",
+            byteSize: 0, sourceCount: 1, kind: .daily
+        )
+        if let storedUsageProbe = try? storage.insertReport(usageProbe, markdown: "# usage \(runID)\n") {
+            try? storage.addReportUsage(reportID: storedUsageProbe.id, promptTokens: 70, completionTokens: 30, usdCost: 0)
+            let reloaded = (try? storage.listReports())?.first { $0.id == storedUsageProbe.id }
+            check("prod-13: addReportUsage accrues prompt tokens (got \(reloaded?.promptTokens ?? -1))",
+                  reloaded?.promptTokens == 70)
+            check("prod-13: addReportUsage accrues completion tokens",
+                  reloaded?.completionTokens == 30)
+            _ = try? storage.deleteReports(ids: [storedUsageProbe.id])
+        }
+
+        // prod-30: upsertItems batched existence check is idempotent, and
+        // sourceReliability aggregates mentions correctly after the N+1 fix.
+        let dupItem = RawItem(
+            title: "Dup probe \(runID)",
+            url: URL(string: "https://mock.example/\(runID)/dup")!,
+            publishedAt: Date(), snippet: "dup", transcript: nil,
+            sourceKind: .hackerNews, author: nil
+        )
+        let dupMap1 = (try? storage.upsertItems([dupItem])) ?? [:]
+        let dupMap2 = (try? storage.upsertItems([dupItem, dupItem])) ?? [:]
+        check("prod-30: upsertItems returns a stable id for a repeated hash",
+              dupMap1[dupItem.urlHash] != nil && dupMap1[dupItem.urlHash] == dupMap2[dupItem.urlHash])
+        let reliability = (try? storage.sourceReliability()) ?? []
+        check("prod-30: sourceReliability aggregates host mentions (got \(reliability.count) hosts)",
+              reliability.contains { $0.host == "mock.example" && $0.mentions >= 1 })
+
+        // prod-46: reconcileFullTextIndex drops orphan FTS rows (parent report
+        // gone) but keeps valid ones.
+        func reportFTSCount(_ reportID: String) -> Int {
+            (try? storage.dbQueue.read { db in
+                try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM report_fts WHERE report_id = ?",
+                                 arguments: [reportID]) ?? 0
+            }) ?? -1
+        }
+        let orphanFTSID = "orphan-fts-\(runID)"
+        try? await storage.dbQueue.write { db in
+            try db.execute(sql: "INSERT INTO report_fts (report_id, topic, body) VALUES (?, ?, ?)",
+                           arguments: [orphanFTSID, "orphan topic", "orphan body \(runID)"])
+        }
+        check("prod-46: orphan report_fts row present before reconcile",
+              reportFTSCount(orphanFTSID) == 1)
+        try? storage.reconcileFullTextIndex()
+        check("prod-46: orphan report_fts row removed after reconcile",
+              reportFTSCount(orphanFTSID) == 0)
+        check("prod-46: valid report_fts row survives reconcile",
+              reportFTSCount(report.id.uuidString) == 1)
+
+        // prod-24: consolidated LLM JSON extraction.
+        check("LLMJSON: slices a bare object",
+              LLMJSON.firstJSONSlice(in: "{\"a\":1}") == "{\"a\":1}")
+        check("LLMJSON: slices an object out of surrounding prose",
+              LLMJSON.firstJSONSlice(in: "here you go {\"a\":1} thanks") == "{\"a\":1}")
+        check("LLMJSON: spans first '{' to last '}' (nested)",
+              LLMJSON.firstJSONSlice(in: "x {\"a\":{\"b\":2}} y") == "{\"a\":{\"b\":2}}")
+        check("LLMJSON: nil when there is no object",
+              LLMJSON.firstJSONSlice(in: "no json here") == nil)
+        check("LLMJSON: strips a ```json fence",
+              LLMJSON.stripFence("```json\n{\"a\":1}\n```").contains("{\"a\":1}")
+              && !LLMJSON.stripFence("```json\n{\"a\":1}\n```").contains("```"))
+        check("LLMJSON: strips a bare ``` fence",
+              !LLMJSON.stripFence("```\n{\"b\":2}\n```").contains("`"))
+        check("LLMJSON: passes through unfenced text",
+              LLMJSON.stripFence("{\"c\":3}") == "{\"c\":3}")
+
+        // prod-33: consent/bot-check interstitial detection for YouTube
+        // watch pages (so EU consent walls don't masquerade as "no transcript").
+        check("prod-33: real watch page (has player config) is not an interstitial",
+              !TranscriptFetcher.isInterstitial("<html>... var ytInitialPlayerResponse = {\"captions\":...} ...</html>"))
+        check("prod-33: consent wall detected",
+              TranscriptFetcher.isInterstitial("<html><head><title>Before you continue to YouTube</title></head><body>consent.youtube.com</body></html>"))
+        check("prod-33: bot-check page detected",
+              TranscriptFetcher.isInterstitial("<html>Sign in to confirm you’re not a bot</html>".replacingOccurrences(of: "’", with: "'")))
+        check("prod-33: page WITH captionTracks is never an interstitial",
+              !TranscriptFetcher.isInterstitial("<html>consent.youtube.com but also \"captionTracks\":[...]</html>"))
+
+        // prod-32: logged() returns the value on success, nil (no crash) on throw.
+        check("prod-32: logged() returns the value on success",
+              logged(Log.app, "selfcheck-ok") { 42 } == 42)
+        check("prod-32: logged() returns nil on a thrown error",
+              logged(Log.app, "selfcheck-throw") { () throws -> Int in
+                  throw NSError(domain: "selfcheck", code: 1)
+              } == nil)
+
+        // prod-22: HTTP failures map to the right SourceError category.
+        check("prod-22: 429 → rateLimited (actionable)", {
+            if case .rateLimited = SourceError.from(status: 429, kind: .reddit) { return true }
+            return false
+        }())
+        check("prod-22: 403 → authFailed (actionable)", {
+            if case .authFailed = SourceError.from(status: 403, kind: .youtubeChannel) { return true }
+            return false
+        }())
+        check("prod-22: 503 → serverError (not actionable)",
+              SourceError.from(status: 503, kind: .news).isActionable == false)
+        check("prod-22: 418 → generic requestFailed",
+              { if case .requestFailed = SourceError.from(status: 418, kind: .web) { return true }; return false }())
+        check("prod-22: rateLimited & authFailed are actionable; server/generic are not",
+              SourceError.from(status: 429, kind: .reddit).isActionable
+              && SourceError.from(status: 401, kind: .web).isActionable
+              && !SourceError.from(status: 500, kind: .news).isActionable
+              && !SourceError.from(status: 404, kind: .news).isActionable)
+        check("prod-22: categorized errors have distinct messages",
+              SourceError.from(status: 429, kind: .reddit).errorDescription
+                != SourceError.from(status: 403, kind: .reddit).errorDescription)
+
+        // prod-36: dangling entity_mention rows (cluster_id pointing at no
+        // cluster) are pruned; real mentions and the empty key are kept.
+        if let topEntity = (try? storage.topEntities(limit: 1))?.first {
+            let bogusCluster = "bogus-cluster-\(runID)"
+            try? storage.recordEntityMention(entityID: topEntity.id, reportID: report.id, clusterID: bogusCluster)
+            check("prod-36: dangling mention present before prune",
+                  (try? storage.entityMentionCount(clusterID: bogusCluster)) == 1)
+            try? storage.pruneDanglingEntityMentions()
+            check("prod-36: dangling mention pruned",
+                  (try? storage.entityMentionCount(clusterID: bogusCluster)) == 0)
+        }
+        check("prod-36: cluster key coerces nil to empty string",
+              StorageManager.entityMentionClusterKey(nil) == ""
+              && StorageManager.entityMentionClusterKey("c1") == "c1")
+
+        // prod-41: per-kind subscription identifier validation.
+        check("prod-41: empty identifier rejected",
+              SubscriptionValidator.validationError(kind: .reddit, identifier: "  ") != nil)
+        check("prod-41: valid subreddit accepted",
+              SubscriptionValidator.validationError(kind: .reddit, identifier: "ethereum") == nil)
+        check("prod-41: subreddit with r/ prefix accepted",
+              SubscriptionValidator.validationError(kind: .reddit, identifier: "r/ethereum") == nil)
+        check("prod-41: subreddit pasted as /r/ethereum accepted (adapter parity)",
+              SubscriptionValidator.validationError(kind: .reddit, identifier: "/r/ethereum") == nil)
+        check("prod-41: RSS rejects non-URL",
+              SubscriptionValidator.validationError(kind: .rss, identifier: "not a url") != nil)
+        check("prod-41: RSS accepts https feed URL",
+              SubscriptionValidator.validationError(kind: .rss, identifier: "https://example.com/feed.xml") == nil)
+        check("prod-41: Nitter rejects a pasted URL",
+              SubscriptionValidator.validationError(kind: .xNitter, identifier: "https://x.com/vitalikbuterin") != nil)
+        check("prod-41: Nitter accepts @handle",
+              SubscriptionValidator.validationError(kind: .xNitter, identifier: "@vitalikbuterin") == nil)
+        check("prod-41: YouTube accepts channel id",
+              SubscriptionValidator.validationError(kind: .youtubeChannel, identifier: "UCabcdefghijklmnopqrstuv") == nil)
+        check("prod-41: YouTube accepts @handle",
+              SubscriptionValidator.validationError(kind: .youtubeChannel, identifier: "@bankless") == nil)
+
+        // prod-14: monthly spend cap query + over-budget decision.
+        check("prod-14: over budget when spent >= cap",
+              SpendGuard.isOverBudget(spentThisMonth: 5.0, budget: 5.0))
+        check("prod-14: under budget when spent < cap",
+              !SpendGuard.isOverBudget(spentThisMonth: 4.99, budget: 5.0))
+        check("prod-14: zero cap means no limit",
+              !SpendGuard.isOverBudget(spentThisMonth: 999, budget: 0))
+        let budgetProbe = Report(
+            id: UUID(), presetID: nil, topic: "Budget probe \(runID)",
+            window: .today, generatedAt: Date(), markdownPath: "",
+            byteSize: 0, sourceCount: 1, kind: .daily
+        )
+        if let storedBudget = try? storage.insertReport(budgetProbe, markdown: "# budget \(runID)\n") {
+            try? storage.addReportUsage(reportID: storedBudget.id, promptTokens: 0, completionTokens: 0, usdCost: 0.42)
+            let spent = (try? storage.spend(since: SpendGuard.monthStart(Date()))) ?? 0
+            check("prod-14: spend(since: monthStart) includes this run's cost (got \(spent))",
+                  spent >= 0.42)
+            _ = try? storage.deleteReports(ids: [storedBudget.id])
+        }
+
+        // prod-34: forward-looking cost estimate scales with call count and
+        // is nil for unknown models.
+        let est1 = ModelPricing.estimate(model: "gpt-4o-mini", calls: 1, avgPromptTokens: 4000, avgCompletionTokens: 1000)
+        let est3 = ModelPricing.estimate(model: "gpt-4o-mini", calls: 3, avgPromptTokens: 4000, avgCompletionTokens: 1000)
+        check("prod-34: estimate is positive for a known model", (est1 ?? 0) > 0)
+        check("prod-34: estimate scales linearly with call count",
+              { if let est1, let est3 { return abs(est3 - est1 * 3) < 1e-9 }; return false }())
+        check("prod-34: estimate is nil for an unknown model",
+              ModelPricing.estimate(model: "totally-unknown-xyz", calls: 2, avgPromptTokens: 1000, avgCompletionTokens: 500) == nil)
+
+        // prod-15: backupDatabase writes a consistent, valid SQLite copy.
+        // Use a high maxBackups so this never prunes a user's real backups
+        // (the Settings-button self-check shares this code path).
+        let sourceReportCount = (try? storage.listReports())?.count ?? -1
+        if let backupURL = try? storage.backupDatabase(maxBackups: 1000) {
+            check("prod-15: backup file created",
+                  FileManager.default.fileExists(atPath: backupURL.path))
+            var backupReportCount: Int?
+            if let backupQueue = try? DatabaseQueue(path: backupURL.path) {
+                backupReportCount = try? await backupQueue.read { db in
+                    try Int.fetchOne(db, sql: "SELECT COUNT(*) FROM report") ?? 0
+                }
+            }
+            check("prod-15: backup is a valid SQLite copy with the report table",
+                  backupReportCount != nil)
+            check("prod-15: backup report count matches source (got \(backupReportCount ?? -1) vs \(sourceReportCount))",
+                  backupReportCount == sourceReportCount)
+        } else {
+            check("prod-15: backupDatabase succeeded", false)
+        }
+
+        // prod-10: HTTP retry classification + backoff.
+        check("Retry: 429 is transient", HTTPRetry.isTransient(status: 429))
+        check("Retry: 503 is transient", HTTPRetry.isTransient(status: 503))
+        check("Retry: 200 is not transient", !HTTPRetry.isTransient(status: 200))
+        check("Retry: 404 is not transient", !HTTPRetry.isTransient(status: 404))
+        check("Retry: timeout URLError is transient", HTTPRetry.isTransient(urlError: .timedOut))
+        check("Retry: badURL URLError is not transient", !HTTPRetry.isTransient(urlError: .badURL))
+        check("Retry: Retry-After delta-seconds parsed",
+              HTTPRetry.retryAfterSeconds(HTTPURLResponse(
+                  url: URL(string: "https://api.example/v1")!, statusCode: 429,
+                  httpVersion: nil, headerFields: ["Retry-After": "7"])!) == 7)
+        check("Retry: backoff honors Retry-After (capped)",
+              HTTPRetry.delay(forAttempt: 1, retryAfter: 3) == 3)
+        check("Retry: backoff capped at maxDelay",
+              HTTPRetry.delay(forAttempt: 1, retryAfter: 9999) == HTTPRetry.maxDelay)
+        let jittered = HTTPRetry.delay(forAttempt: 3, retryAfter: nil)
+        check("Retry: jittered backoff stays within [0, maxDelay] (got \(jittered))",
+              jittered >= 0 && jittered <= HTTPRetry.maxDelay)
+
+        // prod-25: withTimeout returns a fast op's value, throws on a slow op.
+        let fastResult = try? await withTimeout(seconds: 5) { 42 }
+        check("prod-25: withTimeout returns fast op result", fastResult == 42)
+        var timedOut = false
+        do {
+            _ = try await withTimeout(seconds: 0.05) {
+                try await Task.sleep(nanoseconds: 3_000_000_000)
+                return 1
+            }
+        } catch is TimeoutError {
+            timedOut = true
+        } catch {}
+        check("prod-25: withTimeout throws TimeoutError on a slow op", timedOut)
+
         lines.append("")
         lines.append("Final: \(passed ? "PASS" : "FAIL")  ·  report id: \(report.id.uuidString.prefix(8))")
-        return Result(passed: passed, lines: lines)
+        return Result(passed: passed, lines: lines, checks: checks)
     }
 
     /// Pure-data version of `AppState.semanticSearch` for the self-check.

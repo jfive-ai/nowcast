@@ -63,6 +63,7 @@ struct SentimentTrendView: View {
             Image(systemName: "chart.line.uptrend.xyaxis")
                 .font(.title)
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             Text("Not enough data yet")
                 .font(.headline)
             Text("Generate at least three briefs for this preset to see a trend.")

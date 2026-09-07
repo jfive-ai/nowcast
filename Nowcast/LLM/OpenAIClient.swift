@@ -10,7 +10,7 @@ struct OpenAIClient: LLMClient {
 
     init(apiKey: String,
          baseURL: URL = URL(string: "https://api.openai.com/v1")!,
-         session: URLSession = .shared) {
+         session: URLSession = HTTPSessions.llm) {
         self.apiKey = apiKey
         self.baseURL = baseURL
         self.session = session
@@ -33,7 +33,7 @@ struct OpenAIClient: LLMClient {
         request.httpBody = try JSONEncoder().encode(body)
         request.timeoutInterval = 60
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await HTTPRetry.data(for: request, session: session)
         guard let http = response as? HTTPURLResponse else {
             throw LLMError.requestFailed(status: -1, body: "no HTTP response")
         }

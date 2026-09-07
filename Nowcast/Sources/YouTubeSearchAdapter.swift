@@ -9,7 +9,7 @@ struct YouTubeSearchAdapter: SourceAdapter {
     private let session: URLSession
     private let apiKey: String
 
-    init(apiKey: String, session: URLSession = .shared) {
+    init(apiKey: String, session: URLSession = HTTPSessions.standard) {
         self.apiKey = apiKey
         self.session = session
     }
@@ -31,16 +31,21 @@ struct YouTubeSearchAdapter: SourceAdapter {
             URLQueryItem(name: "q", value: trimmed),
             URLQueryItem(name: "publishedAfter", value: Self.rfc3339(window.earliestDate)),
             URLQueryItem(name: "maxResults", value: "20"),
-            URLQueryItem(name: "key", value: apiKey),
         ]
         guard let url = c.url else { return [] }
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
+        // Send the API key as a header so it never lands in a URL that could
+        // be logged, surfaced in an error, or leaked via a redirect.
+        request.setValue(apiKey, forHTTPHeaderField: "X-Goog-Api-Key")
 
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .youtubeSearch)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw SourceError.from(status: http.statusCode, response: http, kind: .youtubeSearch)
         }
 
         let parsed = try JSONDecoder.youtube.decode(YTSearchResponse.self, from: data)

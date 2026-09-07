@@ -20,13 +20,23 @@ struct ReportView: View {
     @State private var followUps: [FollowUpSuggester.Suggestion] = []
     @State private var presetDraft: TopicPreset?
     @State private var sentimentTrendOpen: Bool = false
+    /// False until the brief's markdown/clusters have loaded from disk; gates
+    /// the skeleton placeholder so content doesn't pop in from blank (V9).
+    @State private var loaded: Bool = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         HSplitView {
             ScrollView {
+                if loaded {
                 VStack(alignment: .leading, spacing: 12) {
-                    Text(report.displayTitle)
-                        .font(.largeTitle).bold()
+                    ReportHeaderView(report: report)
+
+                    StatStrip(
+                        storyCount: clusters.count,
+                        itemCount: report.sourceCount,
+                        readMinutes: ReadingTime.minutes(for: markdown)
+                    )
 
                     if state.isBigStory(report) {
                         bigStoryBanner
@@ -34,23 +44,6 @@ struct ReportView: View {
 
                     if report.sentiment != nil {
                         sentimentIndicator
-                    }
-
-                    HStack(spacing: 6) {
-                        Text(report.generatedAt, style: .date)
-                        Text(report.generatedAt, style: .time)
-                        Text("·")
-                        Text(report.window.displayName)
-                        Text("·")
-                        Text("\(report.sourceCount) items")
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                    if let usage = usageSummary {
-                        Text(usage)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
                     }
 
                     if !followUps.isEmpty {
@@ -65,21 +58,34 @@ struct ReportView: View {
 
                     Divider()
 
-                    renderedMarkdown
+                    BriefBodyView(markdown: markdown, urlIndex: urlIndex)
                         .textSelection(.enabled)
 
                     if !clusters.isEmpty {
                         Divider().padding(.top, 8)
-                        Text("Clusters")
-                            .font(.headline)
-                        ForEach(clusters) { cluster in
-                            clusterRow(cluster)
+                        SectionHeader("Clusters", systemImage: "square.stack.3d.up.fill",
+                                      accent: .secondary, tintTitle: false)
+                        ForEach(Array(clusters.enumerated()), id: \.element.id) { idx, cluster in
+                            ClusterCardView(
+                                cluster: cluster,
+                                rank: idx + 1,
+                                feedbackKinds: clusterFeedbackKinds[cluster.id] ?? [],
+                                urlIndex: urlIndex,
+                                onToggle: { kind in toggleClusterFeedback(cluster.id, kind) }
+                            )
                         }
                     }
                 }
                 .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxWidth: Theme.Layout.readingMeasure, alignment: .leading)
+                .frame(maxWidth: .infinity)
+                .transition(.opacity)
+                } else {
+                    ReportSkeletonView()
+                        .transition(.opacity)
+                }
             }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: loaded)
 
             if chatOpen, let session = chatHolder.session {
                 ChatDrawerView(session: session)
@@ -101,6 +107,11 @@ struct ReportView: View {
             // Build a URL → PersistedItem map for citation hover popovers.
             let items = state.itemsForReport(report.id)
             urlIndex = MarkdownLinkText.buildIndex(items: items)
+            // Core content (markdown, clusters, citations) is ready — swap the
+            // skeleton for the real layout. NB: keep this before the first
+            // `await` below; the loads above are synchronous, so there's no
+            // cancellation window that could leave the skeleton stuck.
+            loaded = true
             // Build the provenance rows for the drawer.
             provenanceRows = ProvenanceBuilder.build(clusters: clusters, items: items)
             // Kick off follow-up suggestions in the background; the
@@ -197,9 +208,12 @@ struct ReportView: View {
                 .disabled(state.candidateReportsForCompare(report).isEmpty)
 
                 Button(action: copyMarkdown) {
-                    Label(copyFlash ? "Copied" : "Copy", systemImage: "doc.on.doc")
+                    Label(copyFlash ? "Copied" : "Copy",
+                          systemImage: copyFlash ? "checkmark" : "doc.on.doc")
+                        .foregroundStyle(copyFlash ? Color.green : .secondary)
                 }
                 .help("Copy the report markdown to the clipboard")
+                .animation(reduceMotion ? nil : Theme.Motion.quick, value: copyFlash)
 
                 Menu {
                     Button("Save as Markdown…") { saveMarkdown() }
@@ -292,19 +306,14 @@ struct ReportView: View {
         } label: {
             Label(kind.displayName, systemImage: kind.symbol)
                 .symbolVariant(active ? .fill : .none)
-                .foregroundStyle(active ? color(for: kind) : .secondary)
+                .foregroundStyle(active ? kind.tint : .secondary)
+                // Spring the fill/tint change so toggling feels responsive,
+                // without a persistent scale that would misalign toolbar items.
+                .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.6), value: active)
         }
         .help(kind.displayName)
-    }
-
-    private func color(for kind: Feedback.Kind) -> Color {
-        switch kind {
-        case .thumbsUp:      return .green
-        case .thumbsDown:    return .orange
-        case .hallucination: return .red
-        case .star:          return .yellow
-        case .dismiss:       return .gray
-        }
+        .accessibilityLabel(kind.displayName)
+        .accessibilityValue(active ? "on" : "off")
     }
 
     private func toggleReportFeedback(_ kind: Feedback.Kind) {
@@ -328,64 +337,6 @@ struct ReportView: View {
             set.insert(kind)
         }
         clusterFeedbackKinds[clusterID] = set
-    }
-
-    @ViewBuilder
-    private func clusterRow(_ cluster: BriefingResult.Cluster) -> some View {
-        let kinds = clusterFeedbackKinds[cluster.id] ?? []
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(cluster.headline)
-                    .font(.subheadline).bold()
-                Spacer()
-                clusterButton(cluster.id, kind: .star, active: kinds.contains(.star))
-                clusterButton(cluster.id, kind: .thumbsUp, active: kinds.contains(.thumbsUp))
-                clusterButton(cluster.id, kind: .thumbsDown, active: kinds.contains(.thumbsDown))
-                clusterButton(cluster.id, kind: .dismiss, active: kinds.contains(.dismiss))
-            }
-            Text(cluster.summary)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            if let cp = cluster.counterpoint {
-                counterpointRow(symbol: "exclamationmark.triangle", color: .orange, label: "Counter", text: cp)
-            }
-            if let gap = cluster.gap {
-                counterpointRow(symbol: "questionmark.circle", color: .blue, label: "Not covered", text: gap)
-            }
-        }
-        .padding(8)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color.secondary.opacity(0.06))
-        )
-    }
-
-    @ViewBuilder
-    private func counterpointRow(symbol: String, color: Color, label: String, text: String) -> some View {
-        HStack(alignment: .top, spacing: 6) {
-            Image(systemName: symbol)
-                .foregroundStyle(color)
-                .font(.caption)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(label).font(.caption2).bold().foregroundStyle(color)
-                Text(text).font(.caption)
-            }
-        }
-        .padding(6)
-        .background(RoundedRectangle(cornerRadius: 4).fill(color.opacity(0.08)))
-    }
-
-    @ViewBuilder
-    private func clusterButton(_ clusterID: String, kind: Feedback.Kind, active: Bool) -> some View {
-        Button {
-            toggleClusterFeedback(clusterID, kind)
-        } label: {
-            Image(systemName: kind.symbol)
-                .symbolVariant(active ? .fill : .none)
-                .foregroundStyle(active ? color(for: kind) : .secondary)
-        }
-        .buttonStyle(.plain)
-        .help(kind.displayName)
     }
 
     // MARK: - Toolbar actions
@@ -434,69 +385,19 @@ struct ReportView: View {
         picker.show(relativeTo: .zero, of: anchor, preferredEdge: .minY)
     }
 
-    /// Compact "<provider> · <model> · 1.2k tok · ~$0.01" line. `nil` when
-    /// nothing useful was recorded (Ollama with no usage block, pre-v3 reports).
-    private var usageSummary: String? {
-        var parts: [String] = []
-        if let provider = report.providerUsed, !provider.isEmpty {
-            parts.append(provider)
-        }
-        if let model = report.modelUsed, !model.isEmpty {
-            parts.append(model)
-        }
-        if let total = report.totalTokens, total > 0 {
-            parts.append("\(total) tok")
-        }
-        if let cost = report.usdCost, cost > 0 {
-            parts.append(cost < 0.01 ? "~<$0.01" : String(format: "~$%.3f", cost))
-        }
-        return parts.isEmpty ? nil : parts.joined(separator: " · ")
-    }
-
     private var sentimentIndicator: some View {
-        let sentiment = report.sentiment ?? 0
-        let pct = (sentiment + 1) / 2  // map -1..1 → 0..1
-        let label: String = {
-            if sentiment > 0.25 { return "Bullish" }
-            if sentiment < -0.25 { return "Bearish" }
-            return "Neutral"
-        }()
-        let color: Color = sentiment > 0.25 ? .green : (sentiment < -0.25 ? .red : .secondary)
-        return HStack(spacing: 10) {
-            Text("Coverage tone").font(.caption).foregroundStyle(.secondary)
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.gray.opacity(0.18)).frame(height: 4)
-                    Circle()
-                        .fill(color)
-                        .frame(width: 8, height: 8)
-                        .offset(x: max(0, min(geo.size.width - 8, geo.size.width * pct - 4)))
-                }
-            }
-            .frame(height: 8)
-            Text(label)
-                .font(.caption.bold())
-                .foregroundStyle(color)
-                .frame(width: 60, alignment: .leading)
-            if report.presetID != nil {
-                Button {
-                    sentimentTrendOpen = true
-                } label: {
-                    Label("Trend", systemImage: "chart.line.uptrend.xyaxis")
-                        .labelStyle(.iconOnly)
-                        .font(.caption)
-                }
-                .buttonStyle(.borderless)
-                .help("Show sentiment trend for this preset")
-            }
-        }
-        .help(report.sentimentRationale ?? label)
+        SentimentGauge(
+            sentiment: report.sentiment ?? 0,
+            rationale: report.sentimentRationale,
+            onTrend: report.presetID != nil ? { sentimentTrendOpen = true } : nil
+        )
     }
 
     private var bigStoryBanner: some View {
         HStack(spacing: 8) {
             Image(systemName: "flame.fill")
                 .foregroundStyle(Color.orange)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Big story")
                     .font(.callout).bold()
@@ -524,112 +425,5 @@ struct ReportView: View {
         )
     }
 
-    @ViewBuilder
-    private var renderedMarkdown: some View {
-        // AttributedString(markdown:) handles inline markdown but not full
-        // block elements like headings on macOS. For MVP, render line-by-line:
-        // headings get bold/larger, blank lines preserved, everything else
-        // parses as inline markdown for links/emphasis.
-        VStack(alignment: .leading, spacing: 6) {
-            ForEach(Array(markdown.split(separator: "\n", omittingEmptySubsequences: false).enumerated()), id: \.offset) { _, line in
-                MarkdownLineView(line: String(line), urlIndex: urlIndex)
-            }
-        }
-    }
-}
-
-private struct MarkdownLineView: View {
-    let line: String
-    let urlIndex: [String: PersistedItem]
-
-    var body: some View {
-        if line.hasPrefix("### ") {
-            Text(stripped(prefix: "### "))
-                .font(.title3).bold()
-                .padding(.top, 4)
-        } else if line.hasPrefix("## ") {
-            Text(stripped(prefix: "## "))
-                .font(.title2).bold()
-                .padding(.top, 6)
-        } else if line.hasPrefix("# ") {
-            Text(stripped(prefix: "# "))
-                .font(.title).bold()
-                .padding(.top, 8)
-        } else if line.isEmpty {
-            Text(" ")
-        } else if line.contains("](") {
-            // Prose with at least one [label](url) gets the hoverable
-            // citation chips below the line; headings + plain text fall
-            // through to the simpler renderer.
-            VStack(alignment: .leading, spacing: 2) {
-                Text(attributed)
-                CitationChipRow(markdown: line, urlIndex: urlIndex)
-            }
-        } else {
-            Text(attributed)
-        }
-    }
-
-    private func stripped(prefix p: String) -> String {
-        String(line.dropFirst(p.count))
-    }
-
-    private var attributed: AttributedString {
-        (try? AttributedString(
-            markdown: line,
-            options: AttributedString.MarkdownParsingOptions(
-                interpretedSyntax: .inlineOnlyPreservingWhitespace
-            )
-        )) ?? AttributedString(line)
-    }
-}
-
-/// Renders the hoverable citation chips for a given markdown line.
-/// Pulls links out of the line, looks each up in `urlIndex`, and shows a
-/// chip with a popover preview on hover.
-private struct CitationChipRow: View {
-    let markdown: String
-    let urlIndex: [String: PersistedItem]
-
-    var body: some View {
-        let pairs = MarkdownLinkText.split(markdown).compactMap(\.linkPair)
-        HStack(spacing: 4) {
-            ForEach(Array(pairs.enumerated()), id: \.offset) { _, pair in
-                CitationChipButton(label: pair.0, url: pair.1, item: urlIndex[MarkdownLinkText.normalize(pair.1)])
-            }
-        }
-    }
-}
-
-private struct CitationChipButton: View {
-    let label: String
-    let url: String
-    let item: PersistedItem?
-    @State private var isHovering = false
-
-    var body: some View {
-        Link(destination: URL(string: url) ?? URL(string: "about:blank")!) {
-            HStack(spacing: 4) {
-                Image(systemName: "link.circle.fill")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(host)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal, 6).padding(.vertical, 2)
-            .background(Color.secondary.opacity(0.10))
-            .clipShape(Capsule())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .popover(isPresented: $isHovering, arrowEdge: .top) {
-            CitationPopover(label: label, urlString: url, item: item)
-        }
-    }
-
-    private var host: String {
-        URL(string: url)?.host?.replacingOccurrences(of: "www.", with: "") ?? url
-    }
 }
 

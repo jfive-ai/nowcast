@@ -20,11 +20,25 @@ final class CounterpointAgent {
         self.model = model
     }
 
+    /// Annotated briefing plus the call's token usage so the pipeline can
+    /// fold this (otherwise-untracked) aux call into the report's cost (prod-13).
+    struct TrackedAnnotation {
+        let result: BriefingResult
+        let usage: LLMUsage?
+        let model: String
+    }
+
     /// Returns a new `BriefingResult` with `counterpoint`/`gap` populated on
     /// the clusters where the agent had something to say. Best-effort: on
     /// any failure returns the input unchanged.
     func annotate(_ briefing: BriefingResult, items: [RawItem] = []) async -> BriefingResult {
-        guard !briefing.clusters.isEmpty else { return briefing }
+        await annotateTracked(briefing, items: items).result
+    }
+
+    func annotateTracked(_ briefing: BriefingResult, items: [RawItem] = []) async -> TrackedAnnotation {
+        guard !briefing.clusters.isEmpty else {
+            return TrackedAnnotation(result: briefing, usage: nil, model: model ?? "")
+        }
 
         let labels: [String] = briefing.clusters.indices.map { "c\($0 + 1)" }
         let clusterBlocks = zip(labels, briefing.clusters).map { label, c in
@@ -63,11 +77,13 @@ final class CounterpointAgent {
         do {
             response = try await llm.summarize(prompt: prompt, model: model)
         } catch {
-            return briefing
+            return TrackedAnnotation(result: briefing, usage: nil, model: model ?? "")
         }
 
         let hits = Self.parse(response.text)
-        guard !hits.isEmpty else { return briefing }
+        guard !hits.isEmpty else {
+            return TrackedAnnotation(result: briefing, usage: response.usage, model: response.model)
+        }
 
         let byLabel: [String: Hit] = Dictionary(uniqueKeysWithValues: hits.map { ($0.cluster, $0) })
         var mutated = briefing
@@ -77,7 +93,7 @@ final class CounterpointAgent {
                 mutated.clusters[idx].gap = Self.cleanNull(hit.gap)
             }
         }
-        return mutated
+        return TrackedAnnotation(result: mutated, usage: response.usage, model: response.model)
     }
 
     static func parse(_ raw: String) -> [Hit] {

@@ -13,11 +13,16 @@ struct CitationPopover: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Text(host)
-                    .font(.caption2.bold())
-                    .padding(.horizontal, 6).padding(.vertical, 2)
-                    .background(Color.accentColor.opacity(0.14))
-                    .clipShape(Capsule())
+                HStack(spacing: 3) {
+                    if let symbol = sourceSymbol {
+                        Image(systemName: symbol).font(.caption2)
+                            .accessibilityHidden(true)
+                    }
+                    Text(host).font(.caption2.bold())
+                }
+                .foregroundStyle(sourceTint)
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(sourceTint.opacity(0.14), in: Capsule())
                 if let kind = item?.sourceKind {
                     Text(kind.displayName)
                         .font(.caption2)
@@ -66,6 +71,17 @@ struct CitationPopover: View {
         URL(string: urlString)?.host?.replacingOccurrences(of: "www.", with: "") ?? urlString
     }
 
+    /// Source-kind tint/glyph for the host badge — consistent with the inline
+    /// citation chips. Falls back to the accent color / no glyph when the
+    /// citation isn't in the brief's source set.
+    private var sourceTint: Color {
+        item.map { SourcePalette.color(for: $0.sourceKind) } ?? .accentColor
+    }
+
+    private var sourceSymbol: String? {
+        item.map { SourcePalette.symbol(for: $0.sourceKind) }
+    }
+
     @ViewBuilder
     private var reliabilityBadge: some View {
         if let rel = state.reliability(for: host) {
@@ -73,6 +89,7 @@ struct CitationPopover: View {
                 Image(systemName: rel.band == .ok ? "checkmark.seal.fill" :
                       rel.band == .mixed ? "questionmark.circle" : "exclamationmark.triangle.fill")
                     .font(.caption2)
+                    .accessibilityHidden(true)
                 Text(rel.band.displayName)
                     .font(.caption2.bold())
             }

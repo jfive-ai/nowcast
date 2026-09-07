@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var draftOllamaModel: String = ""
     @State private var draftOllamaURL: String = ""
     @State private var draftRetention: String = ""
+    @State private var draftBudget: String = ""
     @State private var savedFlash: Bool = false
     @State private var selfCheckResult: String = ""
     @State private var selfCheckPassed: Bool? = nil
@@ -45,6 +46,7 @@ struct SettingsView: View {
         draftOllamaModel = state.ollamaModel
         draftOllamaURL = state.ollamaBaseURL
         draftRetention = String(state.retentionDays)
+        draftBudget = state.monthlyBudgetUSD > 0 ? String(format: "%.2f", state.monthlyBudgetUSD) : ""
     }
 
     private var generalTab: some View {
@@ -107,6 +109,22 @@ struct SettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
+            Section("Cost guardrail") {
+                HStack {
+                    Text("$")
+                    TextField("Monthly cap", text: $draftBudget)
+                        .frame(width: 80)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { commitBudget() }
+                    Button("Apply") { commitBudget() }
+                    Spacer()
+                }
+                Text(String(format: "Spent this month: $%.2f · 0 = no limit. Runs are blocked once the cap is reached.",
+                            state.currentMonthSpend()))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
             Section("Pipeline") {
                 Toggle(isOn: queryRewritingBinding) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -148,6 +166,9 @@ struct SettingsView: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                Text(pipelineCostFooter)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
 #if DEBUG
                 VStack(alignment: .leading, spacing: 6) {
                     HStack {
@@ -221,8 +242,26 @@ struct SettingsView: View {
                         .monospacedDigit()
                 }
             }
+
+            Section("About") {
+                HStack {
+                    Text("Version")
+                    Spacer()
+                    Text(Self.appVersionString)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
         }
         .formStyle(.grouped)
+    }
+
+    /// "<short version> (<build>)" from the bundle, e.g. "0.0.1 (1)".
+    static var appVersionString: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "\(version) (\(build))"
     }
 
 #if DEBUG
@@ -367,6 +406,31 @@ struct SettingsView: View {
             state.retentionDays = v
             state.applyRetention()
         }
+        // Revert the field to the authoritative value — discards non-numeric or
+        // negative input (which previously stuck in the field with no effect).
+        draftRetention = String(state.retentionDays)
+    }
+
+    private var pipelineCostFooter: String {
+        let calls = state.pipelineCallCount
+        let base = "Up to \(calls) LLM call\(calls == 1 ? "" : "s") per report with current options."
+        if let cost = state.estimatedCostPerReport(), cost > 0 {
+            // A sub-cent estimate must not render as "$0.00" (reads as free).
+            let costStr = cost < 0.01 ? "< $0.01" : String(format: "$%.2f", cost)
+            return base + " ≈ \(costStr)/report at the current model (rough)."
+        }
+        return base + " Pricing unknown for the selected model."
+    }
+
+    private func commitBudget() {
+        let cleaned = draftBudget.trimmingCharacters(in: .whitespaces)
+            .replacingOccurrences(of: "$", with: "")
+        if cleaned.isEmpty {
+            state.monthlyBudgetUSD = 0
+        } else if let v = Double(cleaned), v >= 0 {
+            state.monthlyBudgetUSD = v
+        }
+        draftBudget = state.monthlyBudgetUSD > 0 ? String(format: "%.2f", state.monthlyBudgetUSD) : ""
     }
 
     private func flashSaved() {

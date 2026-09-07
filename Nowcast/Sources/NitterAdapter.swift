@@ -16,7 +16,7 @@ struct NitterAdapter: SourceAdapter {
     private let session: URLSession
     private let mirrorStore: NitterMirrorStore
 
-    init(mirrorStore: NitterMirrorStore, session: URLSession = .shared) {
+    init(mirrorStore: NitterMirrorStore, session: URLSession = OutboundURLPolicy.guardedSession) {
         self.session = session
         self.mirrorStore = mirrorStore
     }
@@ -35,36 +35,69 @@ struct NitterAdapter: SourceAdapter {
 
         let cutoff = window.earliestDate
 
-        return await withTaskGroup(of: [RawItem].self) { group in
-            for handle in handles {
+        // prod-35: each handle's fetch reports its outcome instead of mutating
+        // the shared mirror list inline. With handles fetched concurrently, the
+        // old inline promote/demote calls interleaved non-deterministically and
+        // hammered the @MainActor store from every task. We collect outcomes,
+        // then apply the rotation ONCE after the join, in stable handle order.
+        let outcomes = await withTaskGroup(of: (Int, HandleOutcome).self) { group in
+            for (index, handle) in handles.enumerated() {
                 group.addTask {
-                    await fetchHandle(handle: handle, mirrors: mirrors, cutoff: cutoff)
+                    (index, await fetchHandle(handle: handle, mirrors: mirrors, cutoff: cutoff))
                 }
             }
-            var all: [RawItem] = []
-            for await chunk in group { all.append(contentsOf: chunk) }
-            return all
+            var collected: [(Int, HandleOutcome)] = []
+            for await pair in group { collected.append(pair) }
+            return collected.sorted { $0.0 < $1.0 }.map(\.1)
         }
+
+        let demotes = outcomes.flatMap(\.failedMirrors)
+        let promotes = outcomes.compactMap(\.succeededMirror)
+        await MainActor.run {
+            // Demote failures first, then promote successes, so a mirror that
+            // worked for at least one handle ends up at the front.
+            for mirror in demotes { mirrorStore.demote(mirror) }
+            for mirror in promotes { mirrorStore.promote(mirror) }
+        }
+        return outcomes.flatMap(\.items)
     }
 
     // MARK: - Internals
 
-    private func fetchHandle(handle: String, mirrors: [String], cutoff: Date) async -> [RawItem] {
+    private struct HandleOutcome {
+        let items: [RawItem]
+        /// The mirror that returned items (to promote), or nil.
+        let succeededMirror: String?
+        /// Mirrors that threw before a success (to demote), in order tried.
+        let failedMirrors: [String]
+    }
+
+    private func fetchHandle(handle: String, mirrors: [String], cutoff: Date) async -> HandleOutcome {
+        var failed: [String] = []
         for base in mirrors {
-            guard let url = URL(string: "\(base)/\(handle)/rss") else { continue }
+            guard let url = URL(string: "\(base)/\(handle)/rss"),
+                  OutboundURLPolicy.allows(url) else { continue }
             do {
                 let items = try await fetchRSS(from: url, cutoff: cutoff)
                 if !items.isEmpty {
-                    await MainActor.run { mirrorStore.promote(base) }
+                    return HandleOutcome(items: items, succeededMirror: base, failedMirrors: failed)
                 }
-                return items
+                // prod-21: a 200-but-EMPTY mirror is "up but returned nothing"
+                // — often a broken/stale mirror, not genuinely no activity. Try
+                // the next mirror before giving up; only after every mirror is
+                // exhausted do we report "no activity".
+                continue
             } catch {
-                await MainActor.run { mirrorStore.demote(base) }
+                failed.append(base)
                 continue
             }
         }
-        // All mirrors failed — surface as "no activity" per the phase risk note.
-        return []
+        // Every mirror failed or returned empty — surface as "no activity" per
+        // the Phase 2.5 risk note (an empty handle is not a report failure).
+        if !failed.isEmpty {
+            Log.network.notice("Nitter: no items for handle; \(failed.count, privacy: .public) mirror(s) errored")
+        }
+        return HandleOutcome(items: [], succeededMirror: nil, failedMirrors: failed)
     }
 
     private func fetchRSS(from url: URL, cutoff: Date) async throws -> [RawItem] {
@@ -74,8 +107,11 @@ struct NitterAdapter: SourceAdapter {
         request.setValue("application/rss+xml, application/xml", forHTTPHeaderField: "Accept")
 
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .xNitter)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw SourceError.from(status: http.statusCode, response: http, kind: .xNitter)
         }
 
         // FeedKit 10 replaced the closure-based `FeedParser` with synchronous

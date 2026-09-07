@@ -23,56 +23,66 @@ struct SMTPClient {
 
     /// Send `message` to all `recipients` over a fresh TLS SMTP session.
     /// Throws on any protocol or I/O error; partial sends are not retried.
+    /// Overall deadline for the whole SMTP exchange. Without it a server that
+    /// completes TLS but then stalls in the data phase (overloaded /
+    /// greylisting servers, a firewall that drops the data phase) hangs the
+    /// email-digest task forever — `NWConnection` reads ignore task
+    /// cancellation, so `onTimeout: { conn.close() }` is what unblocks them.
+    static let exchangeTimeout: TimeInterval = 30
+
     func send(message: EmailMessage) async throws {
         let conn = try await SMTPConnection.open(host: config.host, port: config.port)
         defer { conn.close() }
 
-        // 220 banner
-        _ = try await conn.expect(code: 220)
+        try await withTimeout(seconds: Self.exchangeTimeout, onTimeout: { conn.close() }) {
+            // 220 banner
+            _ = try await conn.expect(code: 220)
 
-        try await conn.send("EHLO nowcast.local\r\n")
-        _ = try await conn.expect(code: 250)
-
-        try await conn.send("AUTH LOGIN\r\n")
-        _ = try await conn.expect(code: 334)
-
-        try await conn.send(Self.base64(config.username) + "\r\n")
-        _ = try await conn.expect(code: 334)
-
-        try await conn.send(Self.base64(config.password) + "\r\n")
-        _ = try await conn.expect(code: 235)
-
-        try await conn.send("MAIL FROM:<\(config.fromAddress)>\r\n")
-        _ = try await conn.expect(code: 250)
-
-        for rcpt in message.recipients {
-            try await conn.send("RCPT TO:<\(rcpt)>\r\n")
+            try await conn.send("EHLO nowcast.local\r\n")
             _ = try await conn.expect(code: 250)
+
+            try await conn.send("AUTH LOGIN\r\n")
+            _ = try await conn.expect(code: 334)
+
+            try await conn.send(Self.base64(config.username) + "\r\n")
+            _ = try await conn.expect(code: 334)
+
+            try await conn.send(Self.base64(config.password) + "\r\n")
+            _ = try await conn.expect(code: 235)
+
+            try await conn.send("MAIL FROM:<\(Self.sanitizeAddress(config.fromAddress))>\r\n")
+            _ = try await conn.expect(code: 250)
+
+            for rcpt in message.recipients {
+                try await conn.send("RCPT TO:<\(Self.sanitizeAddress(rcpt))>\r\n")
+                _ = try await conn.expect(code: 250)
+            }
+
+            try await conn.send("DATA\r\n")
+            _ = try await conn.expect(code: 354)
+
+            let body = Self.buildBody(config: config, message: message)
+            try await conn.send(body)
+            _ = try await conn.expect(code: 250)
+
+            try await conn.send("QUIT\r\n")
+            // Some servers don't send a 221 reply before closing. Don't be picky.
         }
-
-        try await conn.send("DATA\r\n")
-        _ = try await conn.expect(code: 354)
-
-        let body = Self.buildBody(config: config, message: message)
-        try await conn.send(body)
-        _ = try await conn.expect(code: 250)
-
-        try await conn.send("QUIT\r\n")
-        // Some servers don't send a 221 reply before closing. Don't be picky.
     }
 
     // MARK: - Message construction
 
     private static func buildBody(config: Config, message: EmailMessage) -> String {
         let boundary = "nowcast-\(UUID().uuidString)"
-        let from = config.fromName.map { "\($0) <\(config.fromAddress)>" } ?? config.fromAddress
-        let to = message.recipients.joined(separator: ", ")
+        let fromAddress = sanitizeAddress(config.fromAddress)
+        let from = config.fromName.map { "\(sanitizeHeaderValue($0)) <\(fromAddress)>" } ?? fromAddress
+        let to = message.recipients.map(sanitizeAddress).joined(separator: ", ")
         let date = Self.rfc5322Date()
 
         var body = ""
         body += "From: \(from)\r\n"
         body += "To: \(to)\r\n"
-        body += "Subject: \(encodeHeader(message.subject))\r\n"
+        body += "Subject: \(encodeHeader(sanitizeHeaderValue(message.subject)))\r\n"
         body += "Date: \(date)\r\n"
         body += "MIME-Version: 1.0\r\n"
         body += "Content-Type: multipart/alternative; boundary=\"\(boundary)\"\r\n"
@@ -92,6 +102,26 @@ struct SMTPClient {
         body += ".\r\n"
 
         return body
+    }
+
+    // MARK: - Injection guards
+
+    /// Strip CR, LF, and other C0/DEL control characters from a header value.
+    /// Without this a topic or display name containing `\r\n` could inject
+    /// extra headers (e.g. a hidden `Bcc:`) — classic SMTP header injection.
+    static func sanitizeHeaderValue(_ value: String) -> String {
+        String(value.unicodeScalars.filter { $0.value >= 0x20 && $0.value != 0x7F })
+    }
+
+    /// An SMTP address must be a single token with no control chars,
+    /// whitespace, or angle brackets (we add our own `< >`). Stripping these
+    /// prevents both `MAIL FROM`/`RCPT TO` command injection and `From:`/`To:`
+    /// header injection.
+    static func sanitizeAddress(_ value: String) -> String {
+        String(sanitizeHeaderValue(value).unicodeScalars.filter { scalar in
+            let c = Character(scalar)
+            return !c.isWhitespace && c != "<" && c != ">" && c != "," && c != ";"
+        })
     }
 
     /// SMTP transparent-dot rule: a line starting with "." in the body

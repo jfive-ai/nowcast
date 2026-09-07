@@ -1,0 +1,69 @@
+name: CI
+
+# Builds the Debug app from project.yml (via XcodeGen) and runs the in-app
+# SelfCheck harness headlessly as the regression gate. There is no XCTest
+# target yet; the headless self-check is the automated net.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-selfcheck:
+    runs-on: macos-15
+    timeout-minutes: 30
+    env:
+      DERIVED: ${{ github.workspace }}/.derived
+    steps:
+      - uses: actions/checkout@v4
+
+      # XcodeGen (latest from Homebrew) emits a recent project format, and
+      # GRDB 7's manifest declares swift-tools-version:6.1, so we need a
+      # current Xcode — the runner's default can be too old to read either.
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          swift --version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Build (Debug)
+        # CODE_SIGN_ENTITLEMENTS= strips the app-sandbox entitlement for this
+        # CI build only. Production / release builds stay sandboxed; we drop it
+        # here so the headless self-check can redirect its database into a
+        # throwaway NOWCAST_SUPPORT_DIR (the sandbox blocks paths outside the
+        # app container). The binary is still ad-hoc signed so it runs on the
+        # Apple-Silicon runner.
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project Nowcast.xcodeproj \
+            -scheme Nowcast \
+            -configuration Debug \
+            -derivedDataPath "$DERIVED" \
+            CODE_SIGN_ENTITLEMENTS= \
+            build
+
+      - name: Run headless self-check
+        run: |
+          set -euo pipefail
+          APP="$DERIVED/Build/Products/Debug/Nowcast.app/Contents/MacOS/Nowcast"
+          test -x "$APP" || { echo "Built binary not found at $APP"; exit 1; }
+          export NOWCAST_SELF_CHECK=1
+          export NOWCAST_SELF_CHECK_JSON=1
+          export NOWCAST_SUPPORT_DIR="$RUNNER_TEMP/nowcast-selfcheck"
+          "$APP"

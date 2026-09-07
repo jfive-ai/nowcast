@@ -22,7 +22,12 @@ struct KeychainStore {
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecValueData as String:   data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlock,
+            // ThisDeviceOnly: API keys / the SMTP password are never written to
+            // an encrypted backup and never migrate to another device. They're
+            // trivially re-entered, so not syncing credentials is the safer
+            // default. (Existing items keep their old accessibility until the
+            // user next saves the key.)
+            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
         ]
         let status = SecItemAdd(attrs as CFDictionary, nil)
         guard status == errSecSuccess else {

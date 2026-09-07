@@ -7,7 +7,7 @@ struct HackerNewsAdapter: SourceAdapter {
     private let session: URLSession
     private let isoFormatter: ISO8601DateFormatter
 
-    init(session: URLSession = .shared) {
+    init(session: URLSession = HTTPSessions.standard) {
         self.session = session
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
@@ -31,8 +31,11 @@ struct HackerNewsAdapter: SourceAdapter {
         request.timeoutInterval = 30
 
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .hackerNews)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw SourceError.from(status: http.statusCode, response: http, kind: .hackerNews)
         }
         let parsed = try JSONDecoder().decode(HNResponse.self, from: data)
 
@@ -83,11 +86,49 @@ struct HackerNewsAdapter: SourceAdapter {
 
 enum SourceError: Error, LocalizedError {
     case requestFailed(kind: SourceKind)
+    case rateLimited(kind: SourceKind, retryAfter: TimeInterval?)
+    case authFailed(kind: SourceKind)
+    case serverError(kind: SourceKind, status: Int)
+
+    /// Map an HTTP status (+ optional response for `Retry-After`) to a category
+    /// so the source-health panel can tell a 429 rate-limit (wait) from a 401/
+    /// 403 auth-or-quota failure (fix the key) from a generic blip.
+    static func from(status: Int, response: HTTPURLResponse? = nil, kind: SourceKind) -> SourceError {
+        switch status {
+        case 401, 403:
+            return .authFailed(kind: kind)
+        case 429:
+            return .rateLimited(kind: kind, retryAfter: response.flatMap(HTTPRetry.retryAfterSeconds))
+        case 500...599:
+            return .serverError(kind: kind, status: status)
+        default:
+            return .requestFailed(kind: kind)
+        }
+    }
+
+    /// True for failures the user must see / act on (rate-limit, auth/quota) —
+    /// used by adapters that otherwise swallow per-item errors into empty
+    /// results, so quota exhaustion isn't silently reported as "no activity".
+    var isActionable: Bool {
+        switch self {
+        case .rateLimited, .authFailed: return true
+        case .requestFailed, .serverError: return false
+        }
+    }
 
     var errorDescription: String? {
         switch self {
         case .requestFailed(let kind):
             return "\(kind.displayName) request failed."
+        case .rateLimited(let kind, let retryAfter):
+            if let retryAfter {
+                return "\(kind.displayName) rate-limited — retry in ~\(Int(retryAfter))s."
+            }
+            return "\(kind.displayName) rate-limited (429). Try again later."
+        case .authFailed(let kind):
+            return "\(kind.displayName) rejected the request (auth or quota). Check the API key / daily quota."
+        case .serverError(let kind, let status):
+            return "\(kind.displayName) server error (\(status))."
         }
     }
 }

@@ -40,6 +40,7 @@ struct EntitiesView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 TextField("Filter entities…", text: $query)
                     .textFieldStyle(.roundedBorder)
             }
@@ -60,6 +61,7 @@ struct EntitiesView: View {
             HStack {
                 Image(systemName: entity.kind.symbol)
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(entity.canonicalName).font(.callout)
                     Text(entity.kind.displayName)
@@ -112,6 +114,7 @@ struct EntitiesView: View {
             Image(systemName: "circle.grid.cross")
                 .font(.system(size: 36))
                 .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
             Text("No entities yet")
                 .font(.headline)
             Text("Enable Entity extraction in Settings → Pipeline to start building a cross-brief entity index.")

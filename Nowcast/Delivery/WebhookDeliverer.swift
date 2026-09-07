@@ -28,10 +28,13 @@ struct WebhookDeliverer {
         markdown: String,
         clusters: [BriefingResult.Cluster],
         config: WebhookConfig,
-        session: URLSession = .shared
+        session: URLSession = OutboundURLPolicy.guardedSession
     ) async -> Outcome {
         guard let url = URL(string: config.url) else {
             return Outcome(status: nil, errorMessage: "Invalid webhook URL.")
+        }
+        if let reason = OutboundURLPolicy.validationError(for: url) {
+            return Outcome(status: nil, errorMessage: reason)
         }
         let body = renderPayload(report: report, markdown: markdown, clusters: clusters, format: config.format)
         return await post(url: url, body: body, session: session)
@@ -39,9 +42,12 @@ struct WebhookDeliverer {
 
     /// Sends a tiny "hello from Nowcast" payload so the user can verify the
     /// URL works before saving the preset.
-    static func sendTest(config: WebhookConfig, session: URLSession = .shared) async -> Outcome {
+    static func sendTest(config: WebhookConfig, session: URLSession = OutboundURLPolicy.guardedSession) async -> Outcome {
         guard let url = URL(string: config.url) else {
             return Outcome(status: nil, errorMessage: "Invalid webhook URL.")
+        }
+        if let reason = OutboundURLPolicy.validationError(for: url) {
+            return Outcome(status: nil, errorMessage: reason)
         }
         let body: Data
         switch config.format {
@@ -137,7 +143,9 @@ struct WebhookDeliverer {
             let status = (response as? HTTPURLResponse)?.statusCode
             return Outcome(status: status, errorMessage: nil)
         } catch {
-            return Outcome(status: nil, errorMessage: error.localizedDescription)
+            // Redacted: webhook URLs (Slack/Discord) carry a secret path token
+            // that URLSession errors can echo back.
+            return Outcome(status: nil, errorMessage: error.redactedDescription)
         }
     }
 

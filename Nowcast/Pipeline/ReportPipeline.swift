@@ -122,7 +122,9 @@ final class ReportPipeline {
                                 items: [],
                                 startedAt: started,
                                 finishedAt: Date(),
-                                errorMessage: error.localizedDescription
+                                // Redacted: this string is persisted to
+                                // source_run and shown in the Health panel.
+                                errorMessage: error.redactedDescription
                             )
                         }
                     }
@@ -200,7 +202,16 @@ final class ReportPipeline {
            let current = validatedResult, !current.clusters.isEmpty {
             emit(.writingCounterpoints)
             let agent = CounterpointAgent(llm: llm, model: model)
-            validatedResult = await agent.annotate(current, items: fresh)
+            // prod-13: track this aux call's tokens/cost into the run total.
+            let tracked = await agent.annotateTracked(current, items: fresh)
+            validatedResult = tracked.result
+            if let u = tracked.usage {
+                auxUsage = LLMUsage(
+                    promptTokens: auxUsage.promptTokens + u.promptTokens,
+                    completionTokens: auxUsage.completionTokens + u.completionTokens
+                )
+                auxCost += ModelPricing.cost(forModel: tracked.model, usage: u) ?? 0
+            }
         }
         let counterpointSection: String? = validatedResult.flatMap {
             CounterpointAgent.renderMarkdownSection(for: $0)
@@ -258,9 +269,36 @@ final class ReportPipeline {
         let counterpointSuffix = counterpointSection ?? ""
         let markdown = header + "\n\n" + contradictionPrefix + diffPrefix + visibleBody + counterpointSuffix
 
-        // Roll auxiliary LLM calls (query rewriter, contradiction
-        // detector) into the report's recorded tokens + cost so analytics
-        // reflect *all* spend for the run, not just the briefing call.
+        // P7-2: optional smart-title call. Best-effort; nil falls back to
+        // topic. Runs BEFORE the cost rollup below so its tokens are counted
+        // (prod-13 — previously this aux call was dropped from the total).
+        let smartTitle: String?
+        if smartTitlesEnabled,
+           let validated = validatedResult,
+           !validated.clusters.isEmpty {
+            let titler = SmartTitler(llm: llm, model: model)
+            let tracked = await titler.titleTracked(
+                topic: topic,
+                tldr: validated.tldr,
+                clusterHeadlines: validated.clusters.map(\.headline)
+            )
+            smartTitle = tracked.title
+            if let u = tracked.usage {
+                auxUsage = LLMUsage(
+                    promptTokens: auxUsage.promptTokens + u.promptTokens,
+                    completionTokens: auxUsage.completionTokens + u.completionTokens
+                )
+                auxCost += ModelPricing.cost(forModel: tracked.model, usage: u) ?? 0
+            }
+        } else {
+            smartTitle = nil
+        }
+
+        // FIX (codex review PRs #35/#45/#46) + prod-13: roll ALL auxiliary LLM
+        // calls (query rewriter, contradiction detector, counterpoints,
+        // smart-title) into the report's recorded tokens + cost so cost
+        // analytics reflect *all* pre-insert spend, not just the briefing call.
+        // (Entity extraction runs post-insert and is added via addReportUsage.)
         let mainUsage = response.usage
         let mainCost = mainUsage.flatMap {
             ModelPricing.cost(forModel: response.model, usage: $0)
@@ -269,24 +307,9 @@ final class ReportPipeline {
         let totalCompletionTokens = (mainUsage?.completionTokens ?? 0) + auxUsage.completionTokens
         let totalCost = mainCost + auxCost
 
-        // Optional smart-title call. Best-effort; nil falls back to topic.
-        let smartTitle: String?
-        if smartTitlesEnabled,
-           let validated = validatedResult,
-           !validated.clusters.isEmpty {
-            let titler = SmartTitler(llm: llm, model: model)
-            smartTitle = await titler.title(
-                topic: topic,
-                tldr: validated.tldr,
-                clusterHeadlines: validated.clusters.map(\.headline)
-            )
-        } else {
-            smartTitle = nil
-        }
-
-        // Score cross-source agreement on the validated clusters so the
-        // History row and menu bar can surface a "big story" badge when
-        // many independent sources converge on one story.
+        // P8-2: score cross-source agreement on the validated clusters so
+        // the History row and menu bar can surface a "big story" badge
+        // when many independent sources converge on one story.
         let bigStory: BigStoryScorer.Outcome = validatedResult.map(BigStoryScorer.score)
             ?? BigStoryScorer.Outcome(score: 0, headline: nil)
 
@@ -336,7 +359,17 @@ final class ReportPipeline {
             if entityExtractionEnabled {
                 emit(.enrichingEntities)
                 let extractor = EntityExtractor(llm: llm, model: model)
-                await extractor.enrich(briefing: validated, reportID: stored.id, storage: storage)
+                let entityUsage = await extractor.enrich(briefing: validated, reportID: stored.id, storage: storage)
+                // prod-13: entity extraction runs after the report is inserted,
+                // so fold its spend in via an update rather than the draft.
+                if let u = entityUsage.usage {
+                    try? storage.addReportUsage(
+                        reportID: stored.id,
+                        promptTokens: u.promptTokens,
+                        completionTokens: u.completionTokens,
+                        usdCost: ModelPricing.cost(forModel: entityUsage.model, usage: u) ?? 0
+                    )
+                }
             }
         }
 

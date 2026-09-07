@@ -11,8 +11,20 @@ final class SmartTitler {
         self.model = model
     }
 
+    /// Title plus the call's token usage so the pipeline can fold this
+    /// (otherwise-untracked) aux call into the report's cost (prod-13).
+    struct TrackedTitle {
+        let title: String?
+        let usage: LLMUsage?
+        let model: String
+    }
+
     /// Returns a 6-12 word headline, or nil if the LLM call / parse failed.
     func title(topic: String, tldr: [String], clusterHeadlines: [String]) async -> String? {
+        await titleTracked(topic: topic, tldr: tldr, clusterHeadlines: clusterHeadlines).title
+    }
+
+    func titleTracked(topic: String, tldr: [String], clusterHeadlines: [String]) async -> TrackedTitle {
         let body = tldr.prefix(4).enumerated()
             .map { "  - [\($0 + 1)] \($1)" }.joined(separator: "\n")
         let heads = clusterHeadlines.prefix(4)
@@ -38,9 +50,9 @@ final class SmartTitler {
 
         do {
             let response = try await llm.summarize(prompt: prompt, model: model)
-            return Self.parse(response.text)
+            return TrackedTitle(title: Self.parse(response.text), usage: response.usage, model: response.model)
         } catch {
-            return nil
+            return TrackedTitle(title: nil, usage: nil, model: model ?? "")
         }
     }
 

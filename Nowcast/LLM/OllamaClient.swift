@@ -11,7 +11,7 @@ struct OllamaClient: LLMClient {
     private let session: URLSession
 
     init(baseURL: URL = URL(string: "http://localhost:11434")!,
-         session: URLSession = .shared) {
+         session: URLSession = HTTPSessions.llm) {
         self.baseURL = baseURL
         self.session = session
     }
@@ -32,7 +32,7 @@ struct OllamaClient: LLMClient {
         // Local models can be slow on first load.
         request.timeoutInterval = 180
 
-        let (data, response) = try await session.data(for: request)
+        let (data, response) = try await HTTPRetry.data(for: request, session: session)
         guard let http = response as? HTTPURLResponse else {
             throw LLMError.requestFailed(status: -1, body: "no HTTP response")
         }

@@ -11,7 +11,7 @@ struct BraveSearchAdapter: SourceAdapter {
     private let session: URLSession
     private let apiKey: String
 
-    init(apiKey: String, session: URLSession = .shared) {
+    init(apiKey: String, session: URLSession = HTTPSessions.standard) {
         self.apiKey = apiKey
         self.session = session
     }
@@ -41,8 +41,11 @@ struct BraveSearchAdapter: SourceAdapter {
         request.setValue(apiKey, forHTTPHeaderField: "X-Subscription-Token")
 
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .web)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw SourceError.from(status: http.statusCode, response: http, kind: .web)
         }
 
         let parsed = try JSONDecoder().decode(BraveResponse.self, from: data)

@@ -13,6 +13,7 @@ struct FollowUpStrip: View {
             HStack(spacing: 6) {
                 Image(systemName: "sparkles")
                     .foregroundStyle(Color.accentColor)
+                    .accessibilityHidden(true)
                 Text("Follow-ups")
                     .font(.caption.bold())
                     .foregroundStyle(.secondary)
@@ -41,6 +42,7 @@ struct FollowUpStrip: View {
                 Image(systemName: "plus.circle")
                     .font(.caption2)
                     .foregroundStyle(Color.accentColor)
+                    .accessibilityHidden(true)
                 Text(sug.query)
                     .font(.caption2)
                     .foregroundStyle(.secondary)

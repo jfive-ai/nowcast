@@ -15,8 +15,13 @@ struct YouTubeChannelAdapter: SourceAdapter {
     private let apiKey: String
     private let maxVideosPerChannel: Int
 
+    /// App-wide cap on concurrent transcript scrapes (prod-33). Shared across
+    /// channels so N channels × maxVideosPerChannel videos don't all hit
+    /// youtube.com/watch at once.
+    private static let transcriptGate = AsyncSemaphore(4)
+
     init(apiKey: String,
-         session: URLSession = .shared,
+         session: URLSession = HTTPSessions.standard,
          maxVideosPerChannel: Int = 5) {
         self.apiKey = apiKey
         self.session = session
@@ -41,6 +46,10 @@ struct YouTubeChannelAdapter: SourceAdapter {
                     do {
                         return try await fetchChannel(raw: raw, cutoff: cutoff)
                     } catch {
+                        // prod-22: a quota/auth (403) or rate-limit (429) is a
+                        // real state the user must see — don't bury it as "no
+                        // uploads". Other per-channel blips still degrade to [].
+                        if (error as? SourceError)?.isActionable == true { throw error }
                         return []
                     }
                 }
@@ -61,7 +70,9 @@ struct YouTubeChannelAdapter: SourceAdapter {
         return await withTaskGroup(of: RawItem.self) { group in
             for video in videos {
                 group.addTask {
+                    await Self.transcriptGate.acquire()
                     let transcript = try? await TranscriptFetcher.fetch(videoId: video.videoId)
+                    await Self.transcriptGate.release()
                     return RawItem(
                         title: video.title,
                         url: video.url,
@@ -88,7 +99,6 @@ struct YouTubeChannelAdapter: SourceAdapter {
         c.path = "/youtube/v3/channels"
         var items: [URLQueryItem] = [
             URLQueryItem(name: "part", value: "contentDetails"),
-            URLQueryItem(name: "key", value: apiKey),
         ]
         switch normalized {
         case .id(let id):     items.append(URLQueryItem(name: "id", value: id))
@@ -99,9 +109,13 @@ struct YouTubeChannelAdapter: SourceAdapter {
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
+        request.setValue(apiKey, forHTTPHeaderField: "X-Goog-Api-Key")
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .youtubeChannel)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw SourceError.from(status: http.statusCode, response: http, kind: .youtubeChannel)
         }
         let parsed = try JSONDecoder.youtube.decode(ChannelsResponse.self, from: data)
         return parsed.items.first?.contentDetails.relatedPlaylists.uploads
@@ -116,15 +130,18 @@ struct YouTubeChannelAdapter: SourceAdapter {
             URLQueryItem(name: "part", value: "snippet,contentDetails"),
             URLQueryItem(name: "playlistId", value: playlistId),
             URLQueryItem(name: "maxResults", value: String(maxVideosPerChannel)),
-            URLQueryItem(name: "key", value: apiKey),
         ]
         guard let url = c.url else { return [] }
 
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
+        request.setValue(apiKey, forHTTPHeaderField: "X-Goog-Api-Key")
         let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+        guard let http = response as? HTTPURLResponse else {
             throw SourceError.requestFailed(kind: .youtubeChannel)
+        }
+        guard (200..<300).contains(http.statusCode) else {
+            throw SourceError.from(status: http.statusCode, response: http, kind: .youtubeChannel)
         }
         let parsed = try JSONDecoder.youtube.decode(PlaylistItemsResponse.self, from: data)
         return parsed.items.compactMap { item -> Video? in

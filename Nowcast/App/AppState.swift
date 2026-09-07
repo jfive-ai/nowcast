@@ -84,6 +84,11 @@ final class AppState: ObservableObject {
         didSet { UserDefaults.standard.set(retentionDays, forKey: Self.retentionDaysKey) }
     }
 
+    /// Monthly LLM spend cap in USD. 0 means no limit (prod-14).
+    @Published var monthlyBudgetUSD: Double {
+        didSet { UserDefaults.standard.set(monthlyBudgetUSD, forKey: Self.monthlyBudgetKey) }
+    }
+
     /// Fan-out the user's topic into 2-4 sub-queries before fetching.
     /// Costs one extra (cheap) LLM call per run.
     @Published var queryRewritingEnabled: Bool {
@@ -134,7 +139,21 @@ final class AppState: ObservableObject {
 
     private(set) var pipeline: ReportPipeline?
 
+    /// The in-flight briefing call, retained so the user can Stop it (prod-09).
+    private var pipelineTask: Task<Report, Error>?
+
+    /// Cancel the in-flight generation, if any. The pipeline's awaited network
+    /// call unwinds and `runPipeline` records the run as cancelled.
+    func cancelGeneration() {
+        pipelineTask?.cancel()
+    }
+
+    /// True when an LLM provider is configured (i.e. a pipeline could be
+    /// built). Drives the first-run onboarding card.
+    var isProviderConfigured: Bool { pipeline != nil }
+
     static let retentionDaysKey = "nowcast.retention_days"
+    static let monthlyBudgetKey = "nowcast.monthly_budget_usd"
     static let queryRewritingKey = "nowcast.query_rewriting_enabled"
     static let contradictionDetectionKey = "nowcast.contradiction_detection_enabled"
     static let entityExtractionKey = "nowcast.entity_extraction_enabled"
@@ -153,6 +172,10 @@ final class AppState: ObservableObject {
         do {
             self.storage = try StorageManager()
         } catch {
+            // Leave a breadcrumb in the unified log before crashing so the
+            // failure is diagnosable post-mortem (the fatalError message alone
+            // doesn't always survive into a crash report).
+            Log.storage.critical("Failed to open Nowcast database: \(String(describing: error), privacy: .public)")
             fatalError("Failed to open Nowcast database: \(error)")
         }
 
@@ -187,6 +210,7 @@ final class AppState: ObservableObject {
         self.smtpSettings = SMTPSettingsStore.shared.load()
         self.retentionDays = UserDefaults.standard.object(forKey: Self.retentionDaysKey) as? Int
             ?? Self.defaultRetentionDays
+        self.monthlyBudgetUSD = UserDefaults.standard.object(forKey: Self.monthlyBudgetKey) as? Double ?? 0
         self.queryRewritingEnabled = UserDefaults.standard.object(forKey: Self.queryRewritingKey) as? Bool ?? false
         self.contradictionDetectionEnabled = UserDefaults.standard.object(forKey: Self.contradictionDetectionKey) as? Bool ?? false
         self.entityExtractionEnabled = UserDefaults.standard.object(forKey: Self.entityExtractionKey) as? Bool ?? false
@@ -247,6 +271,17 @@ final class AppState: ObservableObject {
         // Backfill big-story scores for reports that pre-dated v15.
         // Same detached pattern; pure DB work, no network.
         backfillBigStoryScoresIfNeeded()
+
+        // prod-36: repair any entity_mention rows whose cluster_id points at a
+        // cluster that was filtered out / never saved, and recompute counts.
+        repairEntityMentionsIfNeeded()
+    }
+
+    /// One-shot launch repair for dangling entity mentions (prod-36).
+    func repairEntityMentionsIfNeeded() {
+        Task.detached { [storage] in
+            logged(Log.storage, "entity-mention repair") { try storage.pruneDanglingEntityMentions() }
+        }
     }
 
     // MARK: - Settings
@@ -319,6 +354,24 @@ final class AppState: ObservableObject {
             lastError = missingProviderMessage
             return
         }
+        // prod-09: don't start a second run on top of an in-flight one (e.g. a
+        // scheduled fire landing while a manual run is generating). We're on
+        // the MainActor and there's no suspension before `isGenerating = true`,
+        // so this check is race-free.
+        guard !isGenerating else {
+            Log.scheduler.notice("skipped overlapping generation (one already in flight)")
+            return
+        }
+        // prod-14: refuse to run once the monthly spend cap is reached, so an
+        // aggressive/unattended schedule can't quietly rack up cost.
+        let monthSpend = (try? storage.spend(since: SpendGuard.monthStart(Date()))) ?? 0
+        if SpendGuard.isOverBudget(spentThisMonth: monthSpend, budget: monthlyBudgetUSD) {
+            lastError = String(
+                format: "Monthly spend cap reached ($%.2f of $%.2f). Raise or clear the cap in Settings → General → Cost guardrail to run again.",
+                monthSpend, monthlyBudgetUSD)
+            Log.pipeline.notice("blocked run: month spend $\(monthSpend, privacy: .public) >= cap $\(self.monthlyBudgetUSD, privacy: .public)")
+            return
+        }
         isGenerating = true
         // The delayed clear below is keyed on a per-run UUID stored
         // *inside* the GenerationState. Pipeline progress events (incl.
@@ -330,6 +383,7 @@ final class AppState: ObservableObject {
         generation = GenerationState(runID: runID, topic: topic, startedAt: Date())
         defer {
             isGenerating = false
+            pipelineTask = nil
             // Keep the final state visible for a moment so the user can
             // see the "Done" stage land before the overlay dismisses.
             Task { @MainActor in
@@ -337,8 +391,9 @@ final class AppState: ObservableObject {
                 if self.generation?.runID == runID { self.generation = nil }
             }
         }
-        do {
-            let report = try await pipeline.generate(
+        // prod-09: run inside a retained Task so cancelGeneration() can stop it.
+        let task = Task<Report, Error> {
+            try await pipeline.generate(
                 topic: topic,
                 window: window,
                 sources: sources,
@@ -350,6 +405,10 @@ final class AppState: ObservableObject {
                     }
                 }
             )
+        }
+        pipelineTask = task
+        do {
+            let report = try await task.value
             refresh()
 
             // Spotlight donation: searchable from anywhere on the Mac.
@@ -375,8 +434,13 @@ final class AppState: ObservableObject {
                 // and history list; no extra side effect needed.
             }
         } catch {
-            lastError = error.localizedDescription
-            generation?.push(.failed(message: error.localizedDescription))
+            if task.isCancelled {
+                // User pressed Stop — not an error worth an alert.
+                generation?.push(.failed(message: "Stopped."))
+            } else {
+                lastError = error.localizedDescription
+                generation?.push(.failed(message: error.localizedDescription))
+            }
         }
     }
 
@@ -408,6 +472,26 @@ final class AppState: ObservableObject {
         }
     }
 
+    /// Delete a single report (History context menu). Removes its Spotlight
+    /// entry, clears the selection if it pointed here, and refreshes. The
+    /// underlying storage delete also prunes the report's markdown file and
+    /// any now-orphaned item rows.
+    func deleteReport(_ report: Report) {
+        do {
+            let removed = try storage.deleteReports(ids: [report.id])
+            SpotlightIndexer.shared.remove(reportIDs: removed)
+            if selectedReportID == report.id { selectedReportID = nil }
+            // Don't leave a deleted brief rendered in the compare pane.
+            if let pair = compareSelection,
+               pair.left.id == report.id || pair.right.id == report.id {
+                compareSelection = nil
+            }
+            refresh()
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
     func applyRetention() {
         // Always prune the seen-index (90d cutoff, independent of report
         // retention). Gating it on `retentionDays > 0` would give a
@@ -420,6 +504,20 @@ final class AppState: ObservableObject {
         }
         let cutoff = Date().addingTimeInterval(-Double(retentionDays) * 86_400)
         do {
+            // prod-15: snapshot the DB before a destructive prune actually
+            // removes anything, so an over-aggressive retention window is
+            // recoverable from the backups/ folder.
+            if let count = try? storage.reportCount(olderThan: cutoff), count > 0 {
+                do {
+                    let backup = try storage.backupDatabase()
+                    Log.storage.info("retention: backed up DB before pruning \(count, privacy: .public) report(s) → \(backup.lastPathComponent, privacy: .public)")
+                } catch {
+                    // Best-effort: a failed backup must not block retention
+                    // forever (e.g. disk full), but log loudly so the prune
+                    // isn't silently unrecoverable.
+                    Log.storage.error("retention: pre-prune backup FAILED, pruning anyway: \(error.redactedDescription, privacy: .public)")
+                }
+            }
             let removed = try storage.deleteReports(olderThan: cutoff)
             SpotlightIndexer.shared.remove(reportIDs: removed)
             refresh()
@@ -428,7 +526,62 @@ final class AppState: ObservableObject {
         }
     }
 
-    // MARK: - Sidebar selection
+    /// Recorded LLM spend (USD) so far this calendar month. Drives the spend
+    /// guardrail display.
+    func currentMonthSpend() -> Double {
+        (try? storage.spend(since: SpendGuard.monthStart(Date()))) ?? 0
+    }
+
+    // MARK: - Cost estimate (prod-34)
+
+    /// Upper bound on LLM calls per report given the enabled pipeline toggles
+    /// (1 briefing call + each opt-in pass). Query rewriting only fires for 3+
+    /// word topics and entity extraction can fall back to rules, so this is a
+    /// ceiling, not an exact count.
+    var pipelineCallCount: Int {
+        1 + [queryRewritingEnabled,
+             contradictionDetectionEnabled,
+             entityExtractionEnabled,
+             counterpointsEnabled,
+             smartTitlesEnabled].filter { $0 }.count
+    }
+
+    /// The model id a run would use: the per-provider override, else the
+    /// provider's default.
+    var effectiveModelName: String {
+        let raw: String
+        switch llmProvider {
+        case .openAI:    raw = openAIModel
+        case .anthropic: raw = anthropicModel
+        case .ollama:    raw = ollamaModel
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? llmProvider.defaultModel : trimmed
+    }
+
+    /// Rough forward-looking cost of one report with the current options, or
+    /// nil when the model's pricing is unknown (local models, custom ids).
+    func estimatedCostPerReport() -> Double? {
+        ModelPricing.estimate(
+            model: effectiveModelName,
+            calls: pipelineCallCount,
+            avgPromptTokens: 4000,
+            avgCompletionTokens: 1000
+        )
+    }
+
+    /// Manual "Back up now". Returns the backup file URL on success.
+    @discardableResult
+    func backupDatabaseNow() -> URL? {
+        do {
+            return try storage.backupDatabase()
+        } catch {
+            lastError = "Backup failed: \(error.redactedDescription)"
+            return nil
+        }
+    }
+
+    // MARK: - Sidebar selection (P4-6)
 
     enum SidebarSection: String, Hashable {
         case history
@@ -439,8 +592,14 @@ final class AppState: ObservableObject {
 
     // MARK: - Search
 
-    func searchReports(_ query: String) -> [StorageManager.SearchHit] {
-        (try? storage.searchReports(query)) ?? []
+    /// Off-main keyword search (prod-29) so the FTS query + JOIN don't block the
+    /// UI while the user types. dbQueue serializes access, so running it on a
+    /// background task is safe.
+    func searchReportsAsync(_ query: String) async -> [StorageManager.SearchHit] {
+        let storage = self.storage
+        return await Task.detached(priority: .userInitiated) {
+            (try? storage.searchReports(query)) ?? []
+        }.value
     }
 
     // MARK: - Semantic search
@@ -461,26 +620,31 @@ final class AppState: ObservableObject {
     /// state instead of a "no results" wall.
     var semanticSearchAvailable: Bool { ReportEmbedder.shared.isAvailable }
 
-    func semanticSearch(_ query: String, limit: Int = 25) -> [SemanticHit] {
+    /// Off-main semantic search (prod-29): the embed read + O(N·dim) cosine
+    /// loop run on a background task so a large archive doesn't freeze typing.
+    /// The report metadata is snapshotted on the main actor first.
+    func semanticSearchAsync(_ query: String, limit: Int = 25) async -> [SemanticHit] {
         let cleaned = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !cleaned.isEmpty,
               let queryVector = ReportEmbedder.shared.embed(cleaned)
         else { return [] }
-        guard let vectors = try? storage.allEmbeddings(), !vectors.isEmpty else { return [] }
-
         let reportByID = Dictionary(uniqueKeysWithValues: reports.map { ($0.id, $0) })
-        let scored: [SemanticHit] = vectors.compactMap { entry in
-            guard let report = reportByID[entry.reportID] else { return nil }
-            let score = ReportEmbedder.similarity(queryVector, entry.vector)
-            return SemanticHit(
-                reportID: report.id,
-                topic: report.topic,
-                title: report.title,
-                generatedAt: report.generatedAt,
-                score: score
-            )
-        }
-        return Array(scored.sorted { $0.score > $1.score }.prefix(limit))
+        let storage = self.storage
+        return await Task.detached(priority: .userInitiated) {
+            guard let vectors = try? storage.allEmbeddings(), !vectors.isEmpty else { return [] }
+            let scored: [SemanticHit] = vectors.compactMap { entry in
+                guard let report = reportByID[entry.reportID] else { return nil }
+                let score = ReportEmbedder.similarity(queryVector, entry.vector)
+                return SemanticHit(
+                    reportID: report.id,
+                    topic: report.topic,
+                    title: report.title,
+                    generatedAt: report.generatedAt,
+                    score: score
+                )
+            }
+            return Array(scored.sorted { $0.score > $1.score }.prefix(limit))
+        }.value
     }
 
     // MARK: - Big story
@@ -694,7 +858,7 @@ final class AppState: ObservableObject {
         do {
             try await sender.send(report: report, markdown: markdown)
         } catch {
-            lastError = "Email digest failed: \(error.localizedDescription)"
+            lastError = "Email digest failed: \(error.redactedDescription)"
         }
     }
 
