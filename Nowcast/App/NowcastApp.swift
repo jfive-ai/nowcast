@@ -4,6 +4,7 @@ import SwiftUI
 struct NowcastApp: App {
     @StateObject private var state = AppState()
     @StateObject private var audioPlayer = AudioBriefPlayer()
+    @StateObject private var updater = AppUpdater()
 
     init() {
         #if DEBUG
@@ -26,6 +27,10 @@ struct NowcastApp: App {
         .windowStyle(.titleBar)
         .commands {
             CommandGroup(replacing: .newItem) {}
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { updater.checkForUpdates() }
+                    .disabled(!updater.canCheckForUpdates)
+            }
         }
 
         Settings {

@@ -31,5 +31,11 @@
 	</dict>
 	<key>NSHumanReadableCopyright</key>
 	<string></string>
+	<key>SUEnableInstallerLauncherService</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>$(NOWCAST_APPCAST_URL)</string>
+	<key>SUPublicEDKey</key>
+	<string>$(NOWCAST_SPARKLE_PUBLIC_KEY)</string>
 </dict>
 </plist>

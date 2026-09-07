@@ -81,6 +81,19 @@ enum SelfCheck {
             check("v18: migration repair (\(error))", false)
         }
 
+        let updateKey = Data(repeating: 1, count: 32).base64EncodedString()
+        check("Updates: valid HTTPS feed and Ed25519 key accepted",
+              UpdateConfiguration(feedURL: "https://example.com/appcast.xml", publicKey: updateKey) != nil)
+        check("Updates: missing configuration disables updater",
+              UpdateConfiguration(feedURL: nil, publicKey: nil) == nil)
+        check("Updates: insecure feed rejected",
+              UpdateConfiguration(feedURL: "http://example.com/appcast.xml", publicKey: updateKey) == nil)
+        check("Updates: credentials in feed URL rejected",
+              UpdateConfiguration(feedURL: "https://user:secret@example.com/appcast.xml", publicKey: updateKey) == nil)
+        check("Updates: malformed or wrong-length public key rejected",
+              UpdateConfiguration(feedURL: "https://example.com/appcast.xml", publicKey: "invalid") == nil
+              && UpdateConfiguration(feedURL: "https://example.com/appcast.xml", publicKey: "AQ==") == nil)
+
         struct JSONProbe: Decodable { let value: Int }
         check("LLMJSON.decode: fenced object",
               LLMJSON.decode(JSONProbe.self, from: "```JSON\n{\"value\":7}\n```")?.value == 7)

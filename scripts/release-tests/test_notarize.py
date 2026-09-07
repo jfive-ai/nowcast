@@ -1,4 +1,5 @@
 """Workflow tests use fake platform tools; they never submit to Apple."""
+import base64
 import json
 import os
 from pathlib import Path
@@ -15,7 +16,10 @@ args = sys.argv[1:]
 with open(os.environ['MOCK_TRACE'], 'a') as out:
     out.write(json.dumps([name, *args]) + '\n')
 if name == 'security':
-    if not os.environ.get('MOCK_NO_IDENTITY'):
+    if os.environ.get('MOCK_MIXED_IDENTITY'):
+        print('1) HASH \"Developer ID Application: Other (ZZZZZ99999)\"')
+        print('2) HASH \"Apple Development: Nowcast (ABCDE12345)\"')
+    elif not os.environ.get('MOCK_NO_IDENTITY'):
         print('1) HASH "Developer ID Application: Nowcast (ABCDE12345)"')
 elif name == 'xcodebuild' and '-exportArchive' in args:
     (Path(args[args.index('-exportPath') + 1]) / 'Nowcast.app').mkdir(parents=True)
@@ -42,6 +46,8 @@ class NotarizeTests(unittest.TestCase):
         self.env = dict(os.environ, PATH=f"{tools}:{os.environ['PATH']}",
                         NOWCAST_DEVELOPMENT_TEAM='ABCDE12345', NOWCAST_NOTARY_PROFILE='test-profile',
                         NOWCAST_RELEASE_VERSION='1.2.0', NOWCAST_BUILD_NUMBER='42',
+                        NOWCAST_APPCAST_URL='https://example.com/appcast.xml',
+                        NOWCAST_SPARKLE_PUBLIC_KEY=base64.b64encode(bytes([1] * 32)).decode(),
                         NOWCAST_RELEASE_DIR=str(self.root / 'release'), MOCK_TRACE=str(self.trace))
 
     def run_script(self, *args):
@@ -61,6 +67,11 @@ class NotarizeTests(unittest.TestCase):
 
     def test_no_identity_stops_before_build(self):
         self.env['MOCK_NO_IDENTITY'] = '1'
+        self.assertNotEqual(self.run_script().returncode, 0)
+        self.assertEqual([c[0] for c in self.calls()], ['security'])
+
+    def test_developer_id_must_match_team_on_the_same_identity(self):
+        self.env['MOCK_MIXED_IDENTITY'] = '1'
         self.assertNotEqual(self.run_script().returncode, 0)
         self.assertEqual([c[0] for c in self.calls()], ['security'])
 
@@ -88,6 +99,15 @@ class NotarizeTests(unittest.TestCase):
         archive = next(c for c in calls if c[0] == 'xcodebuild' and 'archive' in c)
         self.assertIn('MARKETING_VERSION=1.2.0', archive)
         self.assertIn('CURRENT_PROJECT_VERSION=42', archive)
+
+    def test_release_rejects_insecure_or_unconfigured_updater(self):
+        self.env['NOWCAST_APPCAST_URL'] = 'http://example.com/appcast.xml'
+        self.assertNotEqual(self.run_script('--validate-config').returncode, 0)
+        self.assertEqual(self.calls(), [])
+        self.env['NOWCAST_APPCAST_URL'] = 'https://example.com/appcast.xml'
+        self.env['NOWCAST_SPARKLE_PUBLIC_KEY'] = 'invalid'
+        self.assertNotEqual(self.run_script('--validate-config').returncode, 0)
+        self.assertEqual(self.calls(), [])
 
     def test_existing_output_is_not_overwritten(self):
         (self.root / 'release').mkdir()
