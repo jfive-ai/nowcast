@@ -8,6 +8,8 @@ import Combine
 final class AppState: ObservableObject {
     @Published private(set) var reports: [Report] = []
     @Published private(set) var presets: [TopicPreset] = []
+    @Published private(set) var cadenceSuggestions: [UUID: CadenceSuggestion] = [:]
+    private let cadenceAdviceMemory = CadenceAdviceMemory()
     @Published private(set) var subscriptions: [SourceSubscription] = []
     @Published private(set) var totalReportBytes: Int64 = 0
     @Published private(set) var totalItemCount: Int = 0
@@ -241,7 +243,7 @@ final class AppState: ObservableObject {
         refresh()
 
         scheduler.onFire = { [weak self] presetID in
-            await self?.runPreset(id: presetID)
+            await self?.runPreset(id: presetID, isScheduled: true)
         }
         scheduler.reschedule(presets)
 
@@ -329,8 +331,12 @@ final class AppState: ObservableObject {
         await runPipeline(topic: topic, window: window, sources: sources, presetID: nil)
     }
 
-    func runPreset(id: UUID) async {
+    func runPreset(id: UUID, isScheduled: Bool = false) async {
         guard let preset = presets.first(where: { $0.id == id }) else { return }
+        // Manual runs say nothing about the configured interval. Reset before
+        // and after them so refreshes during delivery cannot mix manual rows
+        // with a scheduled streak; require three new scheduled observations.
+        if !isScheduled { dismissCadenceSuggestion(for: preset) }
         await runPipeline(
             topic: preset.query,
             window: preset.window,
@@ -339,6 +345,7 @@ final class AppState: ObservableObject {
             depth: preset.depth,
             tone: preset.tone
         )
+        if !isScheduled { dismissCadenceSuggestion(for: preset) }
         try? storage.updatePresetLastRun(id: preset.id, at: Date())
         loadPresets()
 
@@ -784,6 +791,23 @@ final class AppState: ObservableObject {
 
     // MARK: - Presets
 
+    func advisor(for preset: TopicPreset) -> CadenceSuggestion? {
+        cadenceSuggestions[preset.id]
+    }
+
+    func applyCadenceSuggestion(for presetID: UUID, suggestion: CadenceSuggestion) {
+        guard var preset = presets.first(where: { $0.id == presetID }),
+              preset.cadence == suggestion.currentCadence,
+              advisor(for: preset) == suggestion else { return }
+        preset.cadence = suggestion.proposedCadence
+        savePreset(preset) // Persists and immediately reschedules. Config change resets evidence.
+    }
+
+    func dismissCadenceSuggestion(for preset: TopicPreset) {
+        cadenceAdviceMemory.reset(for: preset)
+        cadenceSuggestions.removeValue(forKey: preset.id)
+    }
+
     func savePreset(_ preset: TopicPreset) {
         do {
             try storage.upsertPreset(preset)
@@ -797,6 +821,7 @@ final class AppState: ObservableObject {
     func deletePreset(_ preset: TopicPreset) {
         do {
             try storage.deletePreset(id: preset.id)
+            cadenceAdviceMemory.forget(preset.id)
             loadPresets()
             scheduler.reschedule(presets)
         } catch {
@@ -807,6 +832,14 @@ final class AppState: ObservableObject {
     private func loadPresets() {
         do {
             presets = try storage.listPresets()
+            var suggestions: [UUID: CadenceSuggestion] = [:]
+            for preset in presets {
+                let since = cadenceAdviceMemory.evidenceSince(for: preset)
+                guard preset.cadence != .manual else { continue }
+                let runs = try storage.recentSourceRuns(forPreset: preset.id, since: since)
+                suggestions[preset.id] = CadenceAdvisor.suggest(recentRuns: runs, currentCadence: preset.cadence)
+            }
+            cadenceSuggestions = suggestions
         } catch {
             lastError = error.localizedDescription
         }
@@ -816,8 +849,10 @@ final class AppState: ObservableObject {
 
     func saveSubscription(_ sub: SourceSubscription) {
         do {
+            let oldKind = subscriptions.first(where: { $0.id == sub.id })?.kind
             try storage.upsertSubscription(sub)
             loadSubscriptions()
+            resetCadenceEvidence(forSources: Set([sub.kind, oldKind].compactMap { $0 }))
         } catch {
             lastError = error.localizedDescription
         }
@@ -827,8 +862,15 @@ final class AppState: ObservableObject {
         do {
             try storage.deleteSubscription(id: sub.id)
             loadSubscriptions()
+            resetCadenceEvidence(forSources: [sub.kind])
         } catch {
             lastError = error.localizedDescription
+        }
+    }
+
+    private func resetCadenceEvidence(forSources sources: Set<SourceKind>) {
+        for preset in presets where !Set(preset.sources).isDisjoint(with: sources) {
+            dismissCadenceSuggestion(for: preset)
         }
     }
 
