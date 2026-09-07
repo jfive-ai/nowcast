@@ -470,8 +470,8 @@ final class StorageManager: @unchecked Sendable {
             try db.execute(sql: """
                 INSERT INTO topic_preset
                   (id, name, query, window, sources_json, cadence_json, delivery_json, created_at, last_run_at,
-                   weekly_digest_enabled, last_weekly_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   weekly_digest_enabled, last_weekly_at, depth, tone)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET
                   name = excluded.name,
                   query = excluded.query,
@@ -481,7 +481,9 @@ final class StorageManager: @unchecked Sendable {
                   delivery_json = excluded.delivery_json,
                   last_run_at = excluded.last_run_at,
                   weekly_digest_enabled = excluded.weekly_digest_enabled,
-                  last_weekly_at = excluded.last_weekly_at
+                  last_weekly_at = excluded.last_weekly_at,
+                  depth = excluded.depth,
+                  tone = excluded.tone
                 """, arguments: [
                     preset.id.uuidString,
                     preset.name,
@@ -494,6 +496,8 @@ final class StorageManager: @unchecked Sendable {
                     preset.lastRunAt,
                     preset.weeklyDigestEnabled ? 1 : 0,
                     preset.lastWeeklyAt,
+                    preset.depth.rawValue,
+                    preset.tone.rawValue,
                 ])
         }
     }
@@ -519,7 +523,7 @@ final class StorageManager: @unchecked Sendable {
         try dbQueue.read { db in
             try Row.fetchAll(db, sql: """
                 SELECT id, name, query, window, sources_json, cadence_json, delivery_json, created_at, last_run_at,
-                       weekly_digest_enabled, last_weekly_at
+                       weekly_digest_enabled, last_weekly_at, depth, tone
                 FROM topic_preset
                 ORDER BY created_at ASC
                 """).compactMap(Self.makePreset)
@@ -1623,7 +1627,9 @@ final class StorageManager: @unchecked Sendable {
             createdAt: createdAt,
             lastRunAt: lastRun,
             weeklyDigestEnabled: weeklyEnabledInt != 0,
-            lastWeeklyAt: lastWeekly
+            lastWeeklyAt: lastWeekly,
+            depth: BriefDepth(rawValue: row["depth"]) ?? .standard,
+            tone: BriefTone(rawValue: row["tone"]) ?? .neutral
         )
     }
 

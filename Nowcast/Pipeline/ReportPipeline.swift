@@ -56,6 +56,8 @@ final class ReportPipeline {
                   sources: [SourceKind],
                   presetID: UUID? = nil,
                   subscriptions: [SourceSubscription] = [],
+                  depth: BriefDepth = .standard,
+                  tone: BriefTone = .neutral,
                   progress: (@Sendable (PipelineStage) -> Void)? = nil) async throws -> Report {
         @Sendable func emit(_ s: PipelineStage) { progress?(s) }
         emit(.started(topic: topic, sourceCount: sources.count))
@@ -180,7 +182,9 @@ final class ReportPipeline {
             topic: topic,
             window: window,
             items: fresh,
-            avoidHint: avoidHint
+            avoidHint: avoidHint,
+            depth: depth,
+            tone: tone
         )
         emit(.llmRequested)
         let response = try await llm.summarize(prompt: prompt, model: model)

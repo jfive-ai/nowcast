@@ -25,6 +25,8 @@ struct TopicPresetEditor: View {
     @State private var deliveryWebhookFormat: WebhookFormat
     @State private var webhookTestStatus: String?
     @State private var weeklyDigestEnabled: Bool
+    @State private var depth: BriefDepth
+    @State private var tone: BriefTone
 
     init(preset: TopicPreset?, onSave: @escaping (TopicPreset) -> Void) {
         self.original = preset
@@ -71,6 +73,8 @@ struct TopicPresetEditor: View {
         _deliveryWebhookFormat = State(initialValue: existingWebhook?.format ?? .generic)
         _webhookTestStatus = State(initialValue: nil)
         _weeklyDigestEnabled = State(initialValue: preset?.weeklyDigestEnabled ?? false)
+        _depth = State(initialValue: preset?.depth ?? .standard)
+        _tone = State(initialValue: preset?.tone ?? .neutral)
     }
 
     var body: some View {
@@ -84,6 +88,10 @@ struct TopicPresetEditor: View {
                             Text(w.displayName).tag(w)
                         }
                     }
+                }
+
+                Section("Briefing style") {
+                    BriefStyleControls(depth: $depth, tone: $tone)
                 }
 
                 Section("Sources") {
@@ -316,7 +324,9 @@ struct TopicPresetEditor: View {
             createdAt: original?.createdAt ?? Date(),
             lastRunAt: liveLastRunAt,
             weeklyDigestEnabled: weeklyDigestEnabled,
-            lastWeeklyAt: liveLastWeeklyAt
+            lastWeeklyAt: liveLastWeeklyAt,
+            depth: depth,
+            tone: tone
         )
     }
 
