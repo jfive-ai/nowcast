@@ -1,0 +1,16 @@
+name: Release tooling
+on:
+  pull_request:
+    paths: ['scripts/notarize.sh', 'scripts/release-tests/**', '.github/workflows/release-tools.yml']
+  push:
+    branches: [main]
+    paths: ['scripts/notarize.sh', 'scripts/release-tests/**', '.github/workflows/release-tools.yml']
+jobs:
+  workflow-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release script and failure handling
+        run: |
+          bash -n scripts/notarize.sh
+          python3 -m unittest discover -s scripts/release-tests -v

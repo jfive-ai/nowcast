@@ -54,3 +54,12 @@ echo "exit $?"   # 0 = pass, 1 = fail
 
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs exactly this on
 every push and pull request.
+
+## Distribution
+
+Use `scripts/notarize.sh` to archive/export a Developer ID app, submit it to
+Apple, staple its ticket, verify it with Gatekeeper, and produce a ZIP.
+The script never publishes the archive. Release builds require your Developer
+ID identity; Debug builds remain ad-hoc for contributors and CI.
+
+See [the release guide](docs/RELEASING.md) for setup, configuration, and validation.
