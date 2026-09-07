@@ -27,10 +27,13 @@ enum PersonalizationSelfCheck {
                     """, arguments: [UUID().uuidString, Date()])
             }
             try Schema.migrator().migrate(db)
-            let style = try await db.read { db in
-                try Row.fetchOne(db, sql: "SELECT depth, tone FROM topic_preset")
+            let migratedDefaults: Bool = try await db.read { db in
+                guard let row = try Row.fetchOne(db, sql: "SELECT depth, tone FROM topic_preset") else { return false }
+                let depth: String = row["depth"]
+                let tone: String = row["tone"]
+                return depth == "standard" && tone == "neutral"
             }
-            check("P7-3: v18 presets migrate to standard/neutral", style?["depth"] as String? == "standard" && style?["tone"] as String? == "neutral")
+            check("P7-3: v18 presets migrate to standard/neutral", migratedDefaults)
             try Schema.migrator().migrate(db)
             check("P7-3: v19 migration is repeatable", true)
 
