@@ -19,4 +19,8 @@ PY
 # Sparkle retrieves its signing key from the login Keychain. No private key
 # belongs in this repository, the app bundle, command arguments, or appcast.
 "$SPARKLE_BIN_DIR/generate_appcast" --download-url-prefix "$NOWCAST_DOWNLOAD_URL_PREFIX" "$1"
+# The generator can warn about a key mismatch yet exit successfully with
+# unsigned enclosures. Reject that output before declaring it publishable.
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+python3 "$script_dir/validate-appcast.py" "$1"
 printf 'Signed appcast generated locally. Publish it with the referenced archives after staging validation.\n'

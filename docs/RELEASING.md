@@ -84,6 +84,9 @@ scripts/generate-appcast.sh build/updates
 ```
 
 The generator reads the private key from Keychain and writes the appcast/deltas.
+The wrapper rejects missing feeds and enclosures without well-formed Ed25519
+signature metadata, including Sparkle's successful-exit/public-key-mismatch case.
+This metadata check does not replace cryptographic verification during staging.
 Publish the generated feed at `NOWCAST_APPCAST_URL` and its archives/deltas at the
 matching download prefix. The script does not upload or enable hosting.
 

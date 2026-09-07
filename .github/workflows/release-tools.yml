@@ -1,10 +1,10 @@
 name: Release tooling
 on:
   pull_request:
-    paths: ['scripts/notarize.sh', 'scripts/generate-appcast.sh', 'scripts/release-tests/**', '.github/workflows/release-tools.yml']
+    paths: ['scripts/notarize.sh', 'scripts/generate-appcast.sh', 'scripts/validate-appcast.py', 'scripts/release-tests/**', '.github/workflows/release-tools.yml']
   push:
     branches: [main]
-    paths: ['scripts/notarize.sh', 'scripts/generate-appcast.sh', 'scripts/release-tests/**', '.github/workflows/release-tools.yml']
+    paths: ['scripts/notarize.sh', 'scripts/generate-appcast.sh', 'scripts/validate-appcast.py', 'scripts/release-tests/**', '.github/workflows/release-tools.yml']
 jobs:
   workflow-tests:
     runs-on: ubuntu-latest
