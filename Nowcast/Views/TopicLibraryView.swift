@@ -86,12 +86,19 @@ struct TopicLibraryView: View {
                     .foregroundStyle(.secondary)
             } else {
                 ForEach(state.presets) { preset in
-                    PresetRow(
-                        preset: preset,
-                        onRun: { Task { await state.runPreset(id: preset.id) } },
-                        onEdit: { editingPreset = preset },
-                        onDelete: { state.deletePreset(preset) }
-                    )
+                    VStack(alignment: .leading, spacing: 6) {
+                        PresetRow(
+                            preset: preset,
+                            onRun: { Task { await state.runPreset(id: preset.id) } },
+                            onEdit: { editingPreset = preset },
+                            onDelete: { state.deletePreset(preset) }
+                        )
+                        if let suggestion = state.advisor(for: preset) {
+                            CadenceSuggestionBanner(suggestion: suggestion, presetName: preset.name,
+                                onApply: { state.applyCadenceSuggestion(for: preset.id, suggestion: suggestion) },
+                                onDismiss: { state.dismissCadenceSuggestion(for: preset) })
+                        }
+                    }
                 }
             }
         }

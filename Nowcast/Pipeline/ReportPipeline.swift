@@ -95,6 +95,7 @@ final class ReportPipeline {
         // (YouTube search, Brave search) also see only the original topic
         // to avoid burning daily quota in a single hourly run.
         let querySensitive: Set<SourceKind> = [.hackerNews, .reddit, .news]
+        let observationStartedAt = Date()
         let outcomes: [FetchOutcome] = await withTaskGroup(of: FetchOutcome.self) { group in
             for kind in sources {
                 guard let adapter = adapters[kind] else { continue }
@@ -150,19 +151,18 @@ final class ReportPipeline {
         let withinRunUnique = Self.dedupeWithinRun(collected)
         let fresh = try storage.filterUnseen(withinRunUnique, presetID: presetID)
 
-        // Record per-adapter source_run rows even on the noFreshItems
-        // path, so health stats include failed/empty runs. Rows need a
-        // report_id, so they're anchored to the most-recent prior report;
-        // the Health panel aggregates by source_kind, so exact attribution
-        // doesn't matter.
-        let healthAnchorID: UUID? = (try? storage.mostRecentReportID()) ?? nil
+        // Empty runs still contribute freshness evidence. Anchor them to this
+        // preset's prior report, never another preset's most recent report.
+        let healthAnchorID = try? storage.mostRecentPriorReport(
+            presetID: presetID, topic: topic, before: Date())?.id
         if fresh.isEmpty {
             // Even though we'll throw, log the adapter outcomes first so
             // a stuck/dead source still shows up in the Health tab.
             if let anchor = healthAnchorID {
                 recordSourceRuns(outcomes: outcomes,
                                  freshURLHashes: Set<String>(),
-                                 reportID: anchor)
+                                 reportID: anchor,
+                                 observationStartedAt: observationStartedAt)
             }
             throw PipelineError.noFreshItems
         }
@@ -404,7 +404,8 @@ final class ReportPipeline {
         let freshURLHashSet = Set(fresh.map(\.urlHash))
         recordSourceRuns(outcomes: outcomes,
                          freshURLHashes: freshURLHashSet,
-                         reportID: stored.id)
+                         reportID: stored.id,
+                         observationStartedAt: observationStartedAt)
 
         emit(.done(reportID: stored.id))
         return stored
@@ -412,7 +413,8 @@ final class ReportPipeline {
 
     private func recordSourceRuns(outcomes: [FetchOutcome],
                                   freshURLHashes: Set<String>,
-                                  reportID: UUID) {
+                                  reportID: UUID,
+                                  observationStartedAt: Date) {
         var attributed = Set<String>()
         for outcome in outcomes {
             var thisSourceFresh = 0
@@ -426,7 +428,9 @@ final class ReportPipeline {
                 id: UUID(),
                 reportID: reportID,
                 sourceKind: outcome.kind,
-                startedAt: outcome.startedAt,
+                // Shared generation boundary allows cadence analysis to group
+                // all sources/subqueries, including repeated no-fresh runs.
+                startedAt: observationStartedAt,
                 finishedAt: outcome.finishedAt,
                 itemsReturned: outcome.items.count,
                 itemsFresh: thisSourceFresh,

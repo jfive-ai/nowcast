@@ -13,6 +13,7 @@ final class BackgroundScheduler {
     var onFire: ((UUID) async -> Void)?
 
     private var activities: [UUID: NSBackgroundActivityScheduler] = [:]
+    private var scheduleTokens: [UUID: UUID] = [:]
 
     func reschedule(_ presets: [TopicPreset]) {
         let active = Set(presets.map(\.id))
@@ -25,6 +26,7 @@ final class BackgroundScheduler {
     }
 
     func cancel(presetID: UUID) {
+        scheduleTokens.removeValue(forKey: presetID)
         if let existing = activities.removeValue(forKey: presetID) {
             existing.invalidate()
         }
@@ -33,6 +35,7 @@ final class BackgroundScheduler {
     func cancelAll() {
         for activity in activities.values { activity.invalidate() }
         activities.removeAll()
+        scheduleTokens.removeAll()
     }
 
     // MARK: - Internals
@@ -56,15 +59,24 @@ final class BackgroundScheduler {
         // here is replaced before it can fire.
         Log.scheduler.info("preset \(preset.id.uuidString, privacy: .public) armed to fire in ~\(Int(interval), privacy: .public)s")
 
+        let token = UUID()
+        scheduleTokens[preset.id] = token
         let capturedPreset = preset
         activity.schedule { [weak self] completion in
             Task { @MainActor in
+                guard self?.scheduleTokens[capturedPreset.id] == token else {
+                    completion(.finished)
+                    return
+                }
                 Log.scheduler.info("preset \(capturedPreset.id.uuidString, privacy: .public) fired")
                 await self?.onFire?(capturedPreset.id)
                 completion(.finished)
                 // Re-arm the same preset so hourly/daily/weekly cadences
                 // actually recur. `schedule(_:)` invalidates the just-fired
                 // activity and registers a fresh one from now.
+                // Applying advice/editing/deleting while this run awaited must
+                // not let the old callback overwrite the newly armed schedule.
+                guard self?.scheduleTokens[capturedPreset.id] == token else { return }
                 self?.schedule(capturedPreset)
             }
         }

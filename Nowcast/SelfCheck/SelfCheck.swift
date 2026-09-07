@@ -82,6 +82,7 @@ enum SelfCheck {
         }
 
         await PersonalizationSelfCheck.run(storage: storage, check: check)
+        await CadenceAdvisorSelfCheck.run(storage: storage, check: check)
 
         struct JSONProbe: Decodable { let value: Int }
         check("LLMJSON.decode: fenced object",

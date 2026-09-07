@@ -1033,6 +1033,33 @@ final class StorageManager: @unchecked Sendable {
         }
     }
 
+    /// Latest complete generation groups for one preset. No row limit may cut
+    /// through a multi-source run, so limit timestamps first, then fetch all rows.
+    func recentSourceRuns(forPreset presetID: UUID, since: Date, limit: Int = CadenceAdvisor.windowSize) throws -> [SourceRun] {
+        try dbQueue.read { db in
+            let rows = try Row.fetchAll(db, sql: """
+                WITH recent AS (
+                    SELECT DISTINCT sr.started_at FROM source_run sr
+                    JOIN report r ON r.id = sr.report_id
+                    WHERE r.preset_id = ? AND sr.started_at > ?
+                    ORDER BY sr.started_at DESC LIMIT ?
+                )
+                SELECT sr.* FROM source_run sr JOIN report r ON r.id = sr.report_id
+                WHERE r.preset_id = ? AND sr.started_at IN (SELECT started_at FROM recent)
+                ORDER BY sr.started_at DESC, sr.id
+                """, arguments: [presetID.uuidString, since, max(1, limit), presetID.uuidString])
+            return rows.compactMap { row in
+                guard let id = UUID(uuidString: row["id"]),
+                      let reportID = UUID(uuidString: row["report_id"]),
+                      let kind = SourceKind(rawValue: row["source_kind"]) else { return nil }
+                return SourceRun(id: id, reportID: reportID, sourceKind: kind,
+                                 startedAt: row["started_at"], finishedAt: row["finished_at"],
+                                 itemsReturned: row["items_returned"], itemsFresh: row["items_fresh"],
+                                 errorMessage: row["error_message"])
+            }
+        }
+    }
+
     func sourceHealth(days: Int = 30) throws -> [SourceHealth] {
         let cutoff = Date().addingTimeInterval(-Double(days) * 86_400)
         return try dbQueue.read { db in
